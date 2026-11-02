@@ -1,5 +1,5 @@
 """Photo -> brick mosaic prototype (Day 1): upload, size, palette match, preview, counts."""
-import base64, csv, io, math
+import base64, csv, io, math, os
 import numpy as np
 from flask import Flask, jsonify, render_template, request
 from PIL import Image, ImageDraw, ImageOps
@@ -19,12 +19,18 @@ except Exception as e:  # anything else: face help is off, everything else still
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
 app = Flask(__name__)
+BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
+
+@app.errorhandler(413)
+def too_big(_):
+    return jsonify(error="The photo is too large. Try a smaller photo."), 413
 DITHER = {"off": 0.0, "soft": 0.5, "normal": 0.8, "strong": 1.0}  # strength on the background
 FACE_KEEP = 0.25  # on the face, dithering is cut to this share, so eyes and lips stay crisp
 FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-Steinberg
 STUD_CM, PLATE_STUDS = 0.8, 24  # 8 mm brick, 24x24-stud baseplate (19.2 cm)
 
-def load_sizes(path="sizes.csv"):
+def load_sizes(path=os.path.join(BASE, "sizes.csv")):
     """All sizes from the supplier's Excel sheet (kept in sizes.csv). Every side must be whole baseplates (multiples of 24 studs)."""
     sizes, groups = {}, {}
     with open(path, newline="", encoding="utf-8") as f:
@@ -39,7 +45,7 @@ def load_sizes(path="sizes.csv"):
 
 SIZES, SIZE_GROUPS = load_sizes()
 
-def load_palette(path="palette_94.csv"):
+def load_palette(path=os.path.join(BASE, "palette_94.csv")):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     rgb = np.array([[int(r["hex"][i:i + 2], 16) for i in (1, 3, 5)] for r in rows], float)
@@ -181,6 +187,7 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
     """Return the brick matrix (single source of truth), target colours, errors and face measures."""
     grade = grade or dict(mode="off", br=0, ct=0, sat=0, sh=0)
     img = ImageOps.exif_transpose(img).convert("RGB")  # match how the browser shows phone photos
+    img.thumbnail((2500, 2500), Image.LANCZOS)  # far more detail than 240 bricks can use; crop fractions stay valid
     if box:  # (x, y, width, height) as fractions of the photo, set by the person in the frame editor
         iw, ih = img.size
         crop = img.crop((round(box[0] * iw), round(box[1] * ih), round((box[0] + box[2]) * iw), round((box[1] + box[3]) * ih)))
@@ -252,16 +259,14 @@ def do_convert():
     rows = [dict(code=PALETTE[i]["code"], name=PALETTE[i]["name"], hex=PALETTE[i]["hex"], count=int(c))
             for i, c in enumerate(counts) if c]
     rows.sort(key=lambda r: -r["count"])
-    buf = io.BytesIO(); render(m, cell=max(5, min(16, 1600 // max(w, h)))).save(buf, "PNG")  # smaller bricks on huge mosaics keeps the picture a sensible size
-    ob = io.BytesIO(); crop.resize((w * 10, h * 10), Image.LANCZOS).save(ob, "JPEG", quality=90)
+    buf = io.BytesIO(); render(m, cell=max(5, min(16, 1600 // max(w, h)))).save(buf, "JPEG", quality=92, subsampling=0)  # smaller bricks on huge mosaics keeps the picture a sensible size
     flat = m.ravel()
     cells = [[int(round(r)), int(round(g)), int(round(b)), int(i), round(float(e0), 2), round(float(e), 2)] for (r, g, b), i, e0, e in zip(photo_rgb, flat, raw, de)]
     stats = dict(mean=round(float(de.mean()), 2), median=round(float(np.median(de)), 2),
                  p90=round(float(np.percentile(de, 90)), 2), max=round(float(de.max()), 2),
                  over5=round(float((de > 5).mean() * 100), 1), raw_mean=round(float(raw.mean()), 2),
                  vs_orig=round(float(vs_orig.mean()), 2), face_structure=structure, face_detail=detail)
-    return jsonify(preview="data:image/png;base64," + base64.b64encode(buf.getvalue()).decode(),
-                   original="data:image/jpeg;base64," + base64.b64encode(ob.getvalue()).decode(),
+    return jsonify(preview="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
                    cells=cells, stats=stats, w=w, h=h, face=face,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",

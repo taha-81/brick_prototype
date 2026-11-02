@@ -52,6 +52,14 @@ input[type=range]{vertical-align:middle;width:110px}
 </div></div><script>
 const $=id=>document.getElementById(id),SZ={{ sizes|tojson }};let D=null,E=null,PV=null;
 /* ---------- photo frame editor: zoom / move the photo, then convert only what is inside the frame ---------- */
+async function shrink(im){let side=2000,blob;  // phone photos are huge; the server only needs about 2000 px
+  for(let i=0;i<4;i++){const sc=Math.min(1,side/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement('canvas');
+    c.width=Math.round(im.naturalWidth*sc);c.height=Math.round(im.naturalHeight*sc);const g=c.getContext('2d');
+    g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(im,0,0,c.width,c.height);
+    blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(blob.size<3.5e6)break;side*=0.75}
+  return blob}
+function cropURL(w,h){const b=cropBox(),c=document.createElement('canvas');c.width=Math.min(1200,w*10);c.height=Math.round(c.width*h/w);
+  c.getContext('2d').drawImage($('eimg'),b.cx*E.nw,b.cy*E.nh,b.cw*E.nw,b.ch*E.nh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.9)}
 function eApply(){if(!E)return;const im=$('eimg');
   E.k=Math.min(E.k0*8,Math.max(E.k0,E.k));const W=E.nw*E.k,H=E.nh*E.k;
   E.ox=Math.min(0,Math.max(E.Fw-W,E.ox));E.oy=Math.min(0,Math.max(E.Fh-H,E.oy));
@@ -75,8 +83,8 @@ function cover(){E.k=E.k0;E.ox=(E.Fw-E.nw*E.k)/2;E.oy=(E.Fh-E.nh*E.k)/2;eApply()
 function frameOnFace(){const f=E.face;E.k=Math.max(E.k0,0.40*E.Fh/(f.h*E.nh));E.ox=E.Fw/2-f.cx*E.nw*E.k;E.oy=E.Fh*0.42-f.cy*E.nh*E.k;eApply()}
 $('zr').onclick=()=>{if(!E)return;E.face?frameOnFace():cover()};
 $('photo').onchange=()=>{const f=$('photo').files[0];if(!f)return;const im=$('eimg');
-  im.onload=async()=>{E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Looking for a face...';
-    try{const fd=new FormData();fd.append('photo',f);const d=await (await fetch('/detect',{method:'POST',body:fd})).json();const mine=E;
+  im.onload=async()=>{E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Preparing photo...';
+    try{const mineE=E;mineE.blob=await shrink(im);$('fstat').textContent='Looking for a face...';const fd=new FormData();fd.append('photo',mineE.blob,'photo.jpg');const d=await (await fetch('/detect',{method:'POST',body:fd})).json();const mine=E;
       if(d.face){mine.face=d.face;frameOnFace();$('fstat').textContent='Face found. The frame is centred on it, you can still move the photo.'}
       else $('fstat').textContent=d.unavailable?'Face detection is off: '+d.unavailable+' Place the photo yourself.':'No front-facing face found. Place the photo yourself.'}catch(e){$('fstat').textContent=''}};im.src=URL.createObjectURL(f)};
 $('size').onchange=()=>{eLayout();if(E&&E.face)frameOnFace()};
@@ -109,11 +117,13 @@ $('m1').onclick=()=>setMode(1);$('m2').onclick=()=>setMode(2);
 $('go').onclick=async()=>{
   $('err').textContent='';const f=$('photo').files[0];
   if(!f||!E){$('err').textContent='Choose a photo first.';return}
-  const fd=new FormData();fd.append('photo',f);fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');
-  const b=cropBox();for(const k in b)fd.append(k,b[k]);$('go').disabled=true;$('go').textContent='Converting...';
-  try{const r=await fetch('/convert',{method:'POST',body:fd});const d=await r.json();
+  if(!E.blob){$('err').textContent='The photo is still being prepared. Try again in a moment.';return}
+  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');
+  const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh);$('go').disabled=true;$('go').textContent='Converting...';
+  try{const r=await fetch('/convert',{method:'POST',body:fd});let d;
+    try{d=await r.json()}catch(_){$('err').textContent=r.status==413?'The photo is too large for the server.':'The server could not finish (error '+r.status+'). Try a smaller size.';return}
     if(!r.ok){$('err').textContent=d.error;return}
-    PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
+    d.original=origURL;PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
     $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
     $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total`;
     const s=d.stats;$('stats').innerHTML=[['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
