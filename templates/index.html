@@ -1,6 +1,9 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Photo to Bricks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
+/* ---------- original rules (kept) ---------- */
 [hidden]{display:none!important}
 body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f4f4f6;color:#222}
 .wrap{max-width:1100px;margin:auto}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
@@ -18,38 +21,245 @@ h4{margin:6px 0}table{border-collapse:collapse;width:100%;background:#fff}td,th{
 .sw{display:inline-block;width:16px;height:16px;border:1px solid #999;vertical-align:middle}#err{color:#b91c1c}
 #insp{background:#fff;border-radius:8px;padding:8px 12px;margin:8px 0;min-height:24px}
 input[type=range]{vertical-align:middle;width:110px}
-</style></head><body><div class="wrap">
-<h2>Photo to Bricks (prototype) <small style="font-weight:normal;font-size:12px;color:#888">version {{ version }}</small></h2>
-<div class="row"><input type="file" id="photo" accept="image/png,image/jpeg">
-<select id="size">{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
-<select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
-<button id="go">Convert</button></div>
-<div class="row"><select id="gmode"><option value="off">Grading: Off</option><option value="auto" selected>Grading: Auto</option><option value="custom">Grading: Custom</option></select>
-<label><input type="checkbox" id="boost"> Face boost (experimental)</label>
-<label><input type="checkbox" id="skin" checked> Skin protection</label></div>
-<div class="row" id="sliders" hidden>
-<label>Brightness <input type="range" id="gbr" min="-50" max="50" value="0"></label>
-<label>Contrast <input type="range" id="gct" min="-50" max="50" value="0"></label>
-<label>Colour <input type="range" id="gsat" min="-50" max="50" value="0"></label>
-<label>Sharpness <input type="range" id="gsh" min="0" max="100" value="0"></label></div>
-<div id="editor" hidden>
-<p><b>Adjust your photo.</b> Pinch or use the mouse wheel to zoom the photo, drag to move it. Only what is inside the frame becomes bricks.</p>
-<div id="frame"><img id="eimg" alt=""></div>
-<p id="fstat" style="text-align:center;font-size:13px;margin:0 0 8px"></p>
-<div class="row" style="justify-content:center"><button class="alt" id="zi">Zoom +</button><button class="alt" id="zo">Zoom -</button><button class="alt" id="zr">Reset</button></div>
+
+/* ---------- new look: every colour below is a real brick from palette_94.csv ---------- */
+:root{
+  --plate:#23415D;      /* C35 Dark Blue: the baseplate */
+  --yellow:#FFD300;     /* C20 Yellow: main action */
+  --blue:#0065B2;       /* C34 Blue: active states, focus */
+  --ink:#302E32;        /* C5 Black */
+  --mute:#6F7176;       /* C3 Dark Bluish Gray */
+  --line:#D5D8D9;       /* light tint of C2 Light Bluish Gray */
+  --page:#ECEEEF;
+  --panel:#FFFFFF;
+  --soft:#F4F5F6;
+  --red:#B4232B;
+  --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
+  --text:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --ink:#ECEEEF;--mute:#A3A9AA;--line:#3A3E44;--page:#1C1E21;--panel:#26292D;--soft:#2E3236;--red:#FF8A80;--blue:#58A3DA;
+}}
+body{font-family:var(--text);background:var(--page);color:var(--ink);padding:0;font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;padding:0 20px 64px}
+small{color:var(--mute)}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* header: a baseplate with studs, the title sits on a yellow tile */
+.plate{
+  background-color:var(--plate);
+  background-image:
+    radial-gradient(circle at 45% 42%,rgba(255,255,255,.16) 0 3px,transparent 4px),
+    radial-gradient(circle,rgba(255,255,255,.07) 0 6px,rgba(0,0,0,.28) 6.5px 7.5px,transparent 8.5px);
+  background-size:24px 24px;background-position:0 0;
+  color:#fff;padding:36px 0 40px;margin-bottom:28px;
+}
+.plate-in{max-width:1180px;margin:auto;padding:0 20px;box-sizing:border-box}
+.tile{display:inline-block;background:var(--yellow);color:#302E32;border-radius:4px;padding:10px 20px 12px;
+  box-shadow:0 2px 0 #C9A600,0 10px 24px rgba(0,0,0,.35)}
+.tile h2{font-family:var(--display);font-weight:800;font-size:clamp(28px,5vw,44px);line-height:1.05;margin:0;letter-spacing:-.01em}
+.tile h2 .proto{font-weight:600;font-size:.5em;vertical-align:.35em;opacity:.75}
+.tile h2 small{font-family:var(--text);font-weight:400!important;font-size:12px!important;color:#5B5A5E!important;display:block;margin-top:4px}
+.lede{max-width:56ch;font-size:18px;margin:18px 0 0;color:#E6ECF2;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+
+/* workbench: settings on the left, framing on the right */
+.bench{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:20px;align-items:start}
+@media (max-width:860px){.bench{grid-template-columns:minmax(0,1fr)}}
+.bench>*{min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px}
+.step{display:flex;align-items:center;gap:12px;margin:0 0 12px}
+.step h3{font-family:var(--display);font-weight:600;font-size:20px;margin:0}
+.num{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:800 15px/1 var(--display);color:#302E32;
+  background:radial-gradient(circle at 38% 34%,#FFF076 0 18%,var(--yellow) 45%,#E0B800 100%);box-shadow:inset 0 -2px 0 rgba(0,0,0,.15)}
+.step+.row,.step+.field{margin-top:0}
+.panel>.step:not(:first-child){margin-top:26px;padding-top:22px;border-top:1px solid var(--line)}
+
+/* fields */
+.field{display:grid;align-content:start;gap:4px;margin-bottom:14px;flex:1 1 180px;min-width:0}
+.field>span:first-child{font-weight:700;font-size:14px}
+.hint{font-size:13px;color:var(--mute);line-height:1.4}
+select{font:inherit;font-size:15px;color:var(--ink);background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:9px 10px;width:100%;max-width:100%;min-width:0;text-overflow:ellipsis}
+.two{display:flex;gap:14px;flex-wrap:wrap}
+.toggles{display:grid;gap:8px;margin:4px 0 6px}
+.toggles label{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:start;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;font-weight:700;font-size:15px}
+.toggles input{margin:3px 0 0;width:18px;height:18px;accent-color:var(--blue);grid-row:span 2}
+.toggles .hint{font-weight:400}
+#sliders{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;gap:10px 18px}
+#sliders label{display:flex;align-items:center;gap:8px;font-size:14px}
+input[type=range]{accent-color:var(--blue);width:120px}
+
+/* photo picker: the label is the drop area, the real file input stays inside it */
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;width:100%;box-sizing:border-box;
+  border:2px dashed #A3A9AA;border-radius:10px;padding:22px 16px;background:var(--soft);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 8%,var(--soft))}
+.drop strong{font-family:var(--display);font-size:17px}
+.drop input{font:inherit;font-size:14px;max-width:100%}
+#fname{font-size:13px;color:var(--mute);margin:0}
+
+/* tips */
+details.tips{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:14px 0 18px}
+details.tips summary{cursor:pointer;font-weight:700}
+.tipgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+@media (max-width:520px){.tipgrid{grid-template-columns:1fr}}
+.tipgrid h5{margin:0 0 4px;font-size:14px;font-family:var(--display)}
+.tipgrid p{margin:0 0 8px;font-size:13.5px;line-height:1.45}
+.tipgrid button{font-size:13px;background:var(--panel)}
+
+/* buttons */
+button{font:700 15px/1.2 var(--text);border-radius:7px;padding:10px 16px;background:var(--blue);color:#fff;transition:transform .08s,filter .15s}
+button:hover:not(:disabled){filter:brightness(1.08)}
+button:active:not(:disabled){transform:translateY(1px)}
+button.alt{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+button.on{background:var(--plate);color:#fff;border:1px solid var(--plate)}
+button:disabled{opacity:.55;cursor:not-allowed}
+#go{width:100%;font-family:var(--display);font-size:20px;font-weight:800;padding:15px;background:var(--yellow);color:#302E32;
+  box-shadow:0 3px 0 #C9A600;border-radius:8px}
+#go:disabled{opacity:1;cursor:progress;background:repeating-linear-gradient(-45deg,var(--yellow) 0 14px,#FFE45C 14px 28px);background-size:40px 40px;animation:slide 1s linear infinite}
+@keyframes slide{to{background-position:40px 0}}
+@media (prefers-reduced-motion:reduce){ #go:disabled{animation:none}button{transition:none}}
+
+/* framing panel */
+#editor p{margin:0 0 12px;font-size:15px}
+#frame{box-shadow:0 0 0 1px var(--line),0 8px 22px rgba(0,0,0,.18)}
+#fstat{color:var(--mute)}
+.empty{display:grid;place-items:center;text-align:center;min-height:300px;border-radius:8px;color:var(--mute);padding:20px;
+  background-image:radial-gradient(circle,var(--line) 0 5px,transparent 5.5px);background-size:22px 22px}
+.empty p{background:var(--panel);padding:10px 16px;border-radius:8px;margin:0;max-width:30ch;box-shadow:0 0 0 1px var(--line)}
+#editor:not([hidden])+.empty{display:none}
+
+/* messages */
+#err:empty,#info:empty{display:none}
+#err{margin:20px 0 0;background:color-mix(in srgb,var(--red) 10%,var(--panel));color:var(--red);border:1px solid color-mix(in srgb,var(--red) 35%,transparent);border-radius:8px;padding:10px 14px;font-weight:700}
+#info{margin:28px 0 0;font-family:var(--display);font-weight:600;font-size:18px;background:var(--plate);color:#fff;border-radius:10px 10px 0 0;padding:14px 20px}
+#info+#res{border-top-left-radius:0;border-top-right-radius:0}
+
+/* results */
+#res{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-top:0}
+#info:empty+#res{margin-top:28px}
+.res-h{font-family:var(--display);font-weight:600;font-size:20px;margin:0 0 6px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:12px 0}
+.card{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:0}
+.card b{font-family:var(--display);font-weight:800;font-size:24px;font-variant-numeric:tabular-nums;line-height:1.2}
+.card span{color:var(--mute);font-size:12.5px;line-height:1.3;display:block}
+details.read{margin:4px 0 12px;font-size:14px}
+details.read summary{cursor:pointer;color:var(--blue);font-weight:700}
+#verdict{margin:8px 0 0;color:var(--ink);max-width:80ch;line-height:1.55}
+#prevline{color:var(--mute)!important}
+.viewbar{gap:10px 18px;align-items:center;margin:16px 0 8px}
+.seg{display:inline-flex;align-items:center;gap:0;flex-wrap:wrap}
+.seg>span{font-size:14px;font-weight:700;margin-right:8px}
+.seg button{border-radius:0;padding:8px 14px;font-size:14px}
+.seg button:first-of-type{border-radius:7px 0 0 7px}
+.seg button:last-of-type{border-radius:0 7px 7px 0;margin-left:-1px}
+.viewbar small{color:var(--mute)}
+#insp{background:var(--soft);border:1px solid var(--line);font-size:14.5px;padding:10px 14px;line-height:1.6}
+#insp .sw{border-radius:3px}
+.views{gap:16px;margin-top:8px}
+.pane h4{font-family:var(--display);font-weight:600;font-size:15px;margin:4px 0 8px}
+.vp{border-radius:6px;box-shadow:0 0 0 1px var(--line)}
+.bricks-h{margin:26px 0 10px}
+.bricks-h h4{font-family:var(--display);font-size:18px}
+.tablebox{max-height:480px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{background:var(--panel);font-size:14.5px}
+thead th{position:sticky;top:0;background:var(--soft);font-size:13px;color:var(--mute);z-index:1}
+td,th{border-bottom:1px solid var(--line);padding:7px 12px}
+td:last-child,th:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+tbody tr:hover{background:var(--soft)}
+.sw{width:22px;height:22px;border-radius:4px;border:1px solid rgba(0,0,0,.25)}
+footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font-size:13px}
+</style></head><body>
+<header class="plate"><div class="plate-in">
+<div class="tile"><h2>Photo to Bricks <span class="proto">(prototype)</span> <small style="font-weight:normal;font-size:12px;color:#888">version {{ version }}</small></h2></div>
+<p class="lede">Turn a photo into a brick mosaic. Pick a size, frame the face, and get a preview plus the exact number of bricks in each colour.</p>
+</div></header>
+<div class="wrap">
+
+<section class="bench">
+<div class="panel">
+  <div class="step"><span class="num">1</span><h3>Choose a photo</h3></div>
+  <div class="row">
+    <label class="drop" id="drop" for="photo">
+      <strong>Drop a photo here or browse</strong>
+      <span class="hint">JPG or PNG. Phone photos are fine, they are shrunk automatically.</span>
+      <input type="file" id="photo" accept="image/png,image/jpeg">
+    </label>
+  </div>
+  <p id="fname" hidden></p>
+
+  <div class="step"><span class="num">2</span><h3>Pick a size and look</h3></div>
+  <label class="field"><span>Mosaic size</span>
+    <select id="size">{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
+    <span class="hint">Each baseplate is 24 x 24 studs (19.2 cm). More plates means more bricks and more detail.</span>
+  </label>
+  <div class="two">
+    <label class="field"><span>Colour mixing</span>
+      <select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
+      <span class="hint">Mixes nearby brick colours so shading looks smooth from a distance.</span>
+    </label>
+    <label class="field"><span>Photo touch-up</span>
+      <select id="gmode"><option value="off">Grading: Off</option><option value="auto" selected>Grading: Auto</option><option value="custom">Grading: Custom</option></select>
+      <span class="hint">Adjusts brightness, contrast and colour before bricks are picked.</span>
+    </label>
+  </div>
+  <div class="row" id="sliders" hidden>
+    <label>Brightness <input type="range" id="gbr" min="-50" max="50" value="0"></label>
+    <label>Contrast <input type="range" id="gct" min="-50" max="50" value="0"></label>
+    <label>Colour <input type="range" id="gsat" min="-50" max="50" value="0"></label>
+    <label>Sharpness <input type="range" id="gsh" min="0" max="100" value="0"></label>
+  </div>
+  <div class="toggles">
+    <label><input type="checkbox" id="skin" checked> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
+    <label><input type="checkbox" id="boost"> Face boost (experimental) <span class="hint">Extra contrast on the face only. Best left off for now.</span></label>
+  </div>
+
+  <details class="tips">
+    <summary>Recommended settings</summary>
+    <div class="tipgrid">
+      <div><h5>Small mosaics (1x1 to 2x2 plates)</h5>
+        <p>Dithering Soft, Grading Auto, Skin protection on, Face boost off. Zoom in so the face fills most of the frame.</p>
+        <button type="button" class="alt" id="preSmall">Use small settings</button></div>
+      <div><h5>Large mosaics (3x3 plates and up)</h5>
+        <p>Dithering Normal, Grading Auto, Skin protection on, Face boost off. Zoom out a little to include hair and shoulders.</p>
+        <button type="button" class="alt" id="preLarge">Use large settings</button></div>
+    </div>
+  </details>
+
+  <button id="go">Convert</button>
 </div>
+
+<div class="panel">
+  <div class="step"><span class="num">3</span><h3>Frame the photo</h3></div>
+  <div id="editor" hidden>
+    <p><b>Adjust your photo.</b> Pinch or use the mouse wheel to zoom the photo, drag to move it. Only what is inside the frame becomes bricks.</p>
+    <div id="frame"><img id="eimg" alt=""></div>
+    <p id="fstat" style="text-align:center;font-size:13px;margin:0 0 8px"></p>
+    <div class="row" style="justify-content:center"><button class="alt" id="zi">Zoom +</button><button class="alt" id="zo">Zoom -</button><button class="alt" id="zr">Reset</button></div>
+  </div>
+  <div class="empty"><p>Your photo appears here. If a face is found, the frame centres on it automatically.</p></div>
+</div>
+</section>
+
 <p id="err"></p><p id="info"></p>
 <div id="res" hidden>
-<div class="cards" id="stats"></div><p id="verdict"></p><p id="prevline" style="font-size:13px;color:#555"></p>
-<div class="row"><span>Left side:</span><button id="l1" class="on">Photo</button><button id="l2" class="alt" disabled>Previous result</button><span>Right side:</span><button id="m1" class="on">Mosaic</button><button id="m2" class="alt">Error map</button><small>Tap a brick to inspect.</small></div>
+<h3 class="res-h">How close the bricks are to your photo</h3>
+<div class="cards" id="stats"></div>
+<details class="read"><summary>How to read these numbers</summary><p id="verdict"></p></details>
+<p id="prevline" style="font-size:13px;color:#555"></p>
+<div class="row viewbar">
+  <div class="seg"><span>Left side:</span><button id="l1" class="on">Photo</button><button id="l2" class="alt" disabled>Previous result</button></div>
+  <div class="seg"><span>Right side:</span><button id="m1" class="on">Mosaic</button><button id="m2" class="alt">Error map</button></div>
+  <small>Tap a brick to inspect.</small>
+</div>
 <div id="insp">Tap any brick to compare the photo colour with the brick colour.</div>
 <div class="views">
 <div class="pane"><h4 id="lt">Photo (as framed)</h4><div class="vp" id="vpL"><img id="imgL" alt=""></div></div>
 <div class="pane"><h4 id="rt">Mosaic</h4><div class="vp" id="vpR"><img id="imgR" alt=""><canvas id="cv" hidden></canvas></div></div>
 </div>
-<div class="row"><h4 style="margin:0">Bricks needed</h4><button class="alt" id="csv">Download counts (CSV)</button></div>
-<table id="tbl"><thead><tr><th>Colour</th><th>Code</th><th>Name</th><th>Bricks</th></tr></thead><tbody></tbody></table>
-</div></div><script id="boot" type="application/json">{{ boot|tojson }}</script><script>
+<div class="row bricks-h"><h4 style="margin:0">Bricks needed</h4><button class="alt" id="csv">Download counts (CSV)</button></div>
+<div class="tablebox"><table id="tbl"><thead><tr><th>Colour</th><th>Code</th><th>Name</th><th>Bricks</th></tr></thead><tbody></tbody></table></div>
+</div></div>
+<footer>Colour matching uses the supplier's 94-colour palette. Every size is made of whole 24 x 24 stud baseplates.</footer>
+<script id="boot" type="application/json">{{ boot|tojson }}</script><script>
 const $=id=>document.getElementById(id),BOOT=JSON.parse(document.getElementById('boot').textContent),SZ=BOOT.sizes;let D=null,E=null,PV=null;
 /* ---------- photo frame editor: zoom / move the photo, then convert only what is inside the frame ---------- */
 async function shrink(im){let side=2000,blob;  // phone photos are huge; the server only needs about 2000 px
@@ -135,4 +345,20 @@ $('go').onclick=async()=>{
     layout();$('res').scrollIntoView({behavior:'smooth'});
   }catch(e){$('err').textContent='Something went wrong.'}finally{$('go').disabled=false;$('go').textContent='Convert'}
 };
+</script>
+<script>
+/* ---------- additions for the new look (the original script above is unchanged) ---------- */
+(()=>{const inp=document.getElementById('photo'),drop=document.getElementById('drop'),fn=document.getElementById('fname');
+  const show=()=>{const f=inp.files[0];fn.hidden=!f;if(f)fn.textContent='Selected: '+f.name+' ('+(f.size/1048576).toFixed(1)+' MB)'};
+  inp.addEventListener('change',show);
+  ['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over')}));
+  ['dragleave','dragend','drop'].forEach(t=>drop.addEventListener(t,()=>drop.classList.remove('over')));
+  drop.addEventListener('drop',e=>{e.preventDefault();const fs=e.dataTransfer&&e.dataTransfer.files;
+    if(!fs||!fs.length)return;if(!/^image\/(png|jpeg)$/.test(fs[0].type)){document.getElementById('err').textContent='Please drop a JPG or PNG photo.';return}
+    document.getElementById('err').textContent='';const dt=new DataTransfer();dt.items.add(fs[0]);inp.files=dt.files;inp.dispatchEvent(new Event('change'))});
+  const preset=(d,g)=>{document.getElementById('dither').value=d;const gm=document.getElementById('gmode');gm.value=g;gm.dispatchEvent(new Event('change'));
+    document.getElementById('boost').checked=false;document.getElementById('skin').checked=true};
+  document.getElementById('preSmall').onclick=()=>preset('soft','auto');
+  document.getElementById('preLarge').onclick=()=>preset('normal','auto');
+})();
 </script></body></html>
