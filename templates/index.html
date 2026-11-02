@@ -209,6 +209,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   </div>
   <div class="toggles">
     <label><input type="checkbox" id="skin" checked> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
+    <label><input type="checkbox" id="lim" checked> Limit to 55 colours <span class="hint">Picks the best 55 of the 94 colours for this photo, so fewer brick types are needed. Untick to use all 94.</span></label>
     <label><input type="checkbox" id="boost"> Face boost (experimental) <span class="hint">Extra contrast on the face only. Best left off for now.</span></label>
   </div>
 
@@ -328,7 +329,7 @@ $('go').onclick=async()=>{
   $('err').textContent='';const f=$('photo').files[0];
   if(!f||!E){$('err').textContent='Choose a photo first.';return}
   if(!E.blob){$('err').textContent='The photo is still being prepared. Try again in a moment.';return}
-  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');
+  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('limit',$('lim').checked?'1':'0');
   const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh);$('go').disabled=true;$('go').textContent='Converting...';
   try{const r=await fetch('/convert',{method:'POST',body:fd});let d;
     try{d=await r.json()}catch(_){$('err').textContent=r.status==413?'The photo is too large for the server.':'The server could not finish (error '+r.status+'). Try a smaller size.';return}
@@ -336,7 +337,7 @@ $('go').onclick=async()=>{
     if(d.version!==BOOT.version)$('err').textContent='Page and server are different versions. Press Ctrl+F5.';
     d.original=origURL;PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
     $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
-    $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total`;
+    $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total | ${d.used} colours used${d.limit?' (limit '+d.limit+')':''}`;
     const s=d.stats;$('stats').innerHTML=[['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
       .map(a=>`<div class="card"><b>${a[1]}</b><span>${a[0]}</span></div>`).join('');
     $('verdict').innerHTML='&Delta;E is the colour difference (CIEDE2000, against the Excel hex colours). "Per brick" compares each brick alone with its photo cell. "Blended" compares each brick with its 8 neighbours averaged, which is what your eye sees from a distance and is the fair number once dithering is on. Under 2 is almost invisible, 2 to 5 small, above 5 clearly different. "vs your photo" compares with your untouched photo, so grading raises it on purpose. "Face structure" and "Face detail" run from 0 to 1: higher means the face shapes, then fine details like eyes and lips, survived better.';

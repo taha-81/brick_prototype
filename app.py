@@ -21,7 +21,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day3-shrink-1"
+APP_VERSION = "day4-colour-limit-1"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -33,6 +33,7 @@ DITHER = {"off": 0.0, "soft": 0.5, "normal": 0.8, "strong": 1.0}  # strength on 
 FACE_KEEP = 0.25  # on the face, dithering is cut to this share, so eyes and lips stay crisp
 FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-Steinberg
 STUD_CM, PLATE_STUDS = 0.8, 24  # 8 mm brick, 24x24-stud baseplate (19.2 cm)
+MAX_COLOURS = 55  # client limit: with the colour-limit option on, a mosaic uses at most this many of the 94 colours
 
 def load_sizes(path=os.path.join(BASE, "sizes.csv")):
     """All sizes from the supplier's Excel sheet (kept in sizes.csv). Every side must be whole baseplates (multiples of 24 studs)."""
@@ -130,7 +131,48 @@ def strength_map(m, base):
     """Dithering strength per cell: full on the background, much lower on and around the face."""
     return base * (1 - (1 - FACE_KEEP) * m)
 
-def dither_match(lab, strength, skin=None):
+def pick_palette(lab, m, k=MAX_COLOURS):
+    """Choose the k palette colours that serve this photo best. Returns a True/False mask over the 94 colours.
+    Greedy pick (add the colour that cuts the total error most), then swaps to polish. The face counts 4x, so skin tones win.
+    Squared-ish error (d ** 1.5) so a few badly matched cells weigh more than many slightly off ones."""
+    n = len(PALETTE)
+    if k >= n:
+        return np.ones(n, bool)
+    pts = lab.reshape(-1, 3)
+    w = (1 + 3 * m).reshape(-1)
+    step = 1.0 if len(pts) <= 20000 else 2.0  # merge near-identical cells: same result, much less work
+    _, inv = np.unique(np.round(pts / step).astype(int), axis=0, return_inverse=True)
+    inv = inv.ravel()
+    wu = np.bincount(inv, weights=w)
+    pu = np.stack([np.bincount(inv, weights=w * pts[:, j]) for j in range(3)], 1) / wu[:, None]
+    U = len(pu)
+    D = np.vstack([ciede2000(pu[i:i + 2048, None, :], PAL_LAB[None, :, :]) for i in range(0, U, 2048)])
+    F = D ** 1.5  # (cells, 94) cost of showing each cell with each colour
+    sel, cur = [], np.full(U, np.inf)
+    for _ in range(k):  # greedy
+        cost = (wu[:, None] * np.minimum(cur[:, None], F)).sum(0)
+        cost[sel] = np.inf
+        c = int(cost.argmin())
+        sel.append(c); cur = np.minimum(cur, F[:, c])
+    rows = np.arange(U)
+    for _ in range(2):  # polish: swap a chosen colour for an unused one whenever that lowers the total error
+        moved = False
+        for j in range(k):
+            S = np.array(sel)
+            order = np.argsort(F[:, S], axis=1)[:, :2]
+            best, second = F[rows, S[order[:, 0]]], F[rows, S[order[:, 1]]]
+            without = np.where(order[:, 0] == j, second, best)  # error if colour j were removed
+            others = np.setdiff1d(np.arange(n), S)
+            cost = (wu[:, None] * np.minimum(without[:, None], F[:, others])).sum(0)
+            b = int(cost.argmin())
+            if cost[b] < (wu * best).sum() - 1e-9:
+                sel[j] = int(others[b]); moved = True
+        if not moved:
+            break
+    mask = np.zeros(n, bool); mask[sel] = True
+    return mask
+
+def dither_match(lab, strength, skin=None, allowed=None):
     """Pick a brick per cell with error diffusion. Every pick is still one of the 94 palette colours."""
     h, w, _ = lab.shape
     work, idx = lab.copy(), np.zeros((h, w), int)
@@ -138,6 +180,8 @@ def dither_match(lab, strength, skin=None):
         for x in range(w):
             t = work[y, x].copy(); t[0] = min(100.0, max(0.0, t[0]))
             d2 = ((PAL_LAB - t) ** 2).sum(1)
+            if allowed is not None:
+                d2 = np.where(allowed, d2, 1e9)  # colour limit: only the chosen colours may be used
             if skin is not None and skin[y, x]:
                 d2 = np.where(COOL, 1e9, d2)  # skin protection: no green or blue bricks on skin
             cand = np.argpartition(d2, 8)[:8]  # 8 closest, then judge strictly
@@ -191,7 +235,7 @@ def face_metrics(orig_lab, brick_lab, m):
     c = lambda a, b: round(float(np.nan_to_num(np.corrcoef(a[sel], b[sel])[0, 1])), 3)
     return c(Lo, Lb), c(Lo - blurL(Lo), Lb - blurL(Lb))
 
-def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True):
+def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None):
     """Return the brick matrix (single source of truth), target colours, errors and face measures."""
     grade = grade or dict(mode="off", br=0, ct=0, sat=0, sh=0)
     img = ImageOps.exif_transpose(img).convert("RGB")  # match how the browser shows phone photos
@@ -210,7 +254,8 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
     if boost > 0 and face is not None:  # extra local contrast on the face only
         L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
     skin_cells = (m > 0.5) & (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 25) if skin else None
-    idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells)
+    allowed = pick_palette(lab, m, limit) if limit else None  # None = all 94 colours, exactly as before
+    idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed)
     brick = PAL_LAB[idx]
     raw = ciede2000(lab.reshape(-1, 3), brick.reshape(-1, 3))  # strict, cell by cell
     blend = ciede2000(blur3(lab).reshape(-1, 3), blur3(brick).reshape(-1, 3))  # how it looks from a distance
@@ -261,7 +306,8 @@ def do_convert():
                  br=num("gbr", -50, 50), ct=num("gct", -50, 50), sat=num("gsat", -50, 50), sh=num("gsh", 0, 100))
     m, photo_rgb, raw, de, crop, face, vs_orig, structure, detail = convert(
         img, w, h, box, request.form.get("dither", "normal"), grade,
-        1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "1") == "1")
+        1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "1") == "1",
+        MAX_COLOURS if request.form.get("limit", "0") == "1" else None)
     counts = np.bincount(m.ravel(), minlength=len(PALETTE))
     assert counts.sum() == w * h  # quantities must equal total cells
     rows = [dict(code=PALETTE[i]["code"], name=PALETTE[i]["name"], hex=PALETTE[i]["hex"], count=int(c))
@@ -276,6 +322,7 @@ def do_convert():
                  vs_orig=round(float(vs_orig.mean()), 2), face_structure=structure, face_detail=detail)
     return jsonify(preview="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
                    cells=cells, stats=stats, w=w, h=h, face=face, version=APP_VERSION,
+                   used=len(rows), limit=MAX_COLOURS if request.form.get("limit", "0") == "1" else None,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",
                    plates=(w // PLATE_STUDS) * (h // PLATE_STUDS), total=w * h, colours=rows)
