@@ -1,0 +1,4 @@
+flask
+pillow
+numpy
+opencv-python-headless<5

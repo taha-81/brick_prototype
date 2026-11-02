@@ -1,0 +1,101 @@
+orientation,studs_w,studs_h,plates_w,plates_h,cm_w,cm_h,baseplates,bricks,category
+Square,24,24,1,1,19.2,19.2,1,576,Previously specified
+Square,48,48,2,2,38.4,38.4,4,2304,Previously specified
+Square,72,72,3,3,57.6,57.6,9,5184,Previously specified
+Square,96,96,4,4,76.8,76.8,16,9216,Previously specified
+Square,120,120,5,5,96.0,96.0,25,14400,Additional size option
+Square,144,144,6,6,115.2,115.2,36,20736,Additional size option
+Square,168,168,7,7,134.4,134.4,49,28224,Additional size option
+Square,192,192,8,8,153.6,153.6,64,36864,Additional size option
+Square,216,216,9,9,172.8,172.8,81,46656,Additional size option
+Square,240,240,10,10,192.0,192.0,100,57600,Additional size option
+Portrait,24,48,1,2,19.2,38.4,2,1152,Additional size option
+Portrait,24,72,1,3,19.2,57.6,3,1728,Additional size option
+Portrait,24,96,1,4,19.2,76.8,4,2304,Additional size option
+Portrait,24,120,1,5,19.2,96.0,5,2880,Additional size option
+Portrait,24,144,1,6,19.2,115.2,6,3456,Additional size option
+Portrait,48,72,2,3,38.4,57.6,6,3456,Previously specified
+Portrait,24,168,1,7,19.2,134.4,7,4032,Additional size option
+Portrait,24,192,1,8,19.2,153.6,8,4608,Additional size option
+Portrait,48,96,2,4,38.4,76.8,8,4608,Previously specified
+Portrait,24,216,1,9,19.2,172.8,9,5184,Additional size option
+Portrait,24,240,1,10,19.2,192.0,10,5760,Additional size option
+Portrait,48,120,2,5,38.4,96.0,10,5760,Additional size option
+Portrait,48,144,2,6,38.4,115.2,12,6912,Additional size option
+Portrait,72,96,3,4,57.6,76.8,12,6912,Previously specified
+Portrait,48,168,2,7,38.4,134.4,14,8064,Additional size option
+Portrait,72,120,3,5,57.6,96.0,15,8640,Previously specified
+Portrait,48,192,2,8,38.4,153.6,16,9216,Additional size option
+Portrait,48,216,2,9,38.4,172.8,18,10368,Additional size option
+Portrait,72,144,3,6,57.6,115.2,18,10368,Additional size option
+Portrait,48,240,2,10,38.4,192.0,20,11520,Additional size option
+Portrait,96,120,4,5,76.8,96.0,20,11520,Previously specified
+Portrait,72,168,3,7,57.6,134.4,21,12096,Additional size option
+Portrait,72,192,3,8,57.6,153.6,24,13824,Additional size option
+Portrait,96,144,4,6,76.8,115.2,24,13824,Additional size option
+Portrait,72,216,3,9,57.6,172.8,27,15552,Additional size option
+Portrait,96,168,4,7,76.8,134.4,28,16128,Additional size option
+Portrait,120,144,5,6,96.0,115.2,30,17280,Additional size option
+Portrait,72,240,3,10,57.6,192.0,30,17280,Additional size option
+Portrait,96,192,4,8,76.8,153.6,32,18432,Additional size option
+Portrait,120,168,5,7,96.0,134.4,35,20160,Additional size option
+Portrait,96,216,4,9,76.8,172.8,36,20736,Additional size option
+Portrait,120,192,5,8,96.0,153.6,40,23040,Additional size option
+Portrait,96,240,4,10,76.8,192.0,40,23040,Additional size option
+Portrait,144,168,6,7,115.2,134.4,42,24192,Additional size option
+Portrait,120,216,5,9,96.0,172.8,45,25920,Additional size option
+Portrait,144,192,6,8,115.2,153.6,48,27648,Additional size option
+Portrait,120,240,5,10,96.0,192.0,50,28800,Additional size option
+Portrait,144,216,6,9,115.2,172.8,54,31104,Additional size option
+Portrait,168,192,7,8,134.4,153.6,56,32256,Additional size option
+Portrait,144,240,6,10,115.2,192.0,60,34560,Additional size option
+Portrait,168,216,7,9,134.4,172.8,63,36288,Additional size option
+Portrait,168,240,7,10,134.4,192.0,70,40320,Additional size option
+Portrait,192,216,8,9,153.6,172.8,72,41472,Additional size option
+Portrait,192,240,8,10,153.6,192.0,80,46080,Additional size option
+Portrait,216,240,9,10,172.8,192.0,90,51840,Additional size option
+Landscape,48,24,2,1,38.4,19.2,2,1152,Additional size option
+Landscape,72,24,3,1,57.6,19.2,3,1728,Additional size option
+Landscape,96,24,4,1,76.8,19.2,4,2304,Additional size option
+Landscape,120,24,5,1,96.0,19.2,5,2880,Additional size option
+Landscape,144,24,6,1,115.2,19.2,6,3456,Additional size option
+Landscape,72,48,3,2,57.6,38.4,6,3456,Previously specified
+Landscape,168,24,7,1,134.4,19.2,7,4032,Additional size option
+Landscape,192,24,8,1,153.6,19.2,8,4608,Additional size option
+Landscape,96,48,4,2,76.8,38.4,8,4608,Previously specified
+Landscape,216,24,9,1,172.8,19.2,9,5184,Additional size option
+Landscape,120,48,5,2,96.0,38.4,10,5760,Additional size option
+Landscape,240,24,10,1,192.0,19.2,10,5760,Additional size option
+Landscape,144,48,6,2,115.2,38.4,12,6912,Additional size option
+Landscape,96,72,4,3,76.8,57.6,12,6912,Previously specified
+Landscape,168,48,7,2,134.4,38.4,14,8064,Additional size option
+Landscape,120,72,5,3,96.0,57.6,15,8640,Previously specified
+Landscape,192,48,8,2,153.6,38.4,16,9216,Additional size option
+Landscape,144,72,6,3,115.2,57.6,18,10368,Additional size option
+Landscape,216,48,9,2,172.8,38.4,18,10368,Additional size option
+Landscape,120,96,5,4,96.0,76.8,20,11520,Previously specified
+Landscape,240,48,10,2,192.0,38.4,20,11520,Additional size option
+Landscape,168,72,7,3,134.4,57.6,21,12096,Additional size option
+Landscape,144,96,6,4,115.2,76.8,24,13824,Additional size option
+Landscape,192,72,8,3,153.6,57.6,24,13824,Additional size option
+Landscape,216,72,9,3,172.8,57.6,27,15552,Additional size option
+Landscape,168,96,7,4,134.4,76.8,28,16128,Additional size option
+Landscape,144,120,6,5,115.2,96.0,30,17280,Additional size option
+Landscape,240,72,10,3,192.0,57.6,30,17280,Additional size option
+Landscape,192,96,8,4,153.6,76.8,32,18432,Additional size option
+Landscape,168,120,7,5,134.4,96.0,35,20160,Additional size option
+Landscape,216,96,9,4,172.8,76.8,36,20736,Additional size option
+Landscape,192,120,8,5,153.6,96.0,40,23040,Additional size option
+Landscape,240,96,10,4,192.0,76.8,40,23040,Additional size option
+Landscape,168,144,7,6,134.4,115.2,42,24192,Additional size option
+Landscape,216,120,9,5,172.8,96.0,45,25920,Additional size option
+Landscape,192,144,8,6,153.6,115.2,48,27648,Additional size option
+Landscape,240,120,10,5,192.0,96.0,50,28800,Additional size option
+Landscape,216,144,9,6,172.8,115.2,54,31104,Additional size option
+Landscape,192,168,8,7,153.6,134.4,56,32256,Additional size option
+Landscape,240,144,10,6,192.0,115.2,60,34560,Additional size option
+Landscape,216,168,9,7,172.8,134.4,63,36288,Additional size option
+Landscape,240,168,10,7,192.0,134.4,70,40320,Additional size option
+Landscape,216,192,9,8,172.8,153.6,72,41472,Additional size option
+Landscape,240,192,10,8,192.0,153.6,80,46080,Additional size option
+Landscape,240,216,10,9,192.0,172.8,90,51840,Additional size option

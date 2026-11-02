@@ -1,0 +1,95 @@
+code,name,hex
+C1,White,#F7F0E3
+C2,Light Bluish Gray,#A3A9AA
+C3,Dark Bluish Gray,#6F7176
+C4,Charcoal Gray,#4B4C50
+C5,Black,#302E32
+C6,Dark Brown,#523E37
+C7,Reddish Brown,#73483A
+C8,Dark Orange,#AB5827
+C9,Medium Nougat,#B37C51
+C10,Nougat,#DE9064
+C11,Dark Flesh,#ECA279
+C12,Medium Flesh,#F1B993
+C13,Light Nougat,#EBC0A4
+C14,Light Flesh,#FFD7C3
+C15,Pale Pink,#FDEDE7
+C16,Tan,#DFC790
+C17,Dark Tan,#998769
+C18,Orange,#FF7E30
+C19,Bright Light Orange,#FFAE11
+C20,Yellow,#FFD300
+C21,Bright Light Yellow,#FFF076
+C22,Yellowish Green,#CBF193
+C23,Lime,#9CBB27
+C24,Bright Green,#00A64D
+C25,Green,#00863A
+C26,Dark Green,#1A4D3B
+C27,Olive Green,#8D8F63
+C28,Sand Green,#749883
+C29,Light Aqua,#C1EFE3
+C30,Medium Azure,#00B5CC
+C31,Bright Light Blue,#93BCE6
+C32,Medium Blue,#58A3DA
+C33,Dark Azure,#0094D0
+C34,Blue,#0065B2
+C35,Dark Blue,#23415D
+C36,Sand Blue,#7B91A5
+C37,Dark Purple,#673E87
+C38,Medium Purple,#8154AC
+C39,Medium Lavender,#AE78C2
+C40,Lavender,#C0AEDF
+C41,Bright Pink,#EDAAD6
+C42,Dark Pink,#D85FA5
+C43,Magenta,#B72C75
+C44,Red,#CD2928
+C45,Dark Red,#853433
+C46,Pearl Gold,#B4823E
+C47,Pearl Dark Gray,#484649
+C48,Flat Silver,#7E7A85
+C49,Light Gray,#BFC3C9
+C50,Medium Gray,#959BA3
+C51,Coral,#FF7680
+C52,Dark Turquoise,#009790
+C53,Pastel Purple,#DFC8DF
+C54,Dusty Pink,#CA9FB1
+C55,Muted Purple,#C081A1
+C56,Peach Pink,#E27BA2
+C57,Light Rose,#C55285
+C58,Deep Pink,#E054A1
+C59,Plum Red,#E14585
+C60,Tomato Red,#C2535C
+C61,Flesh Pink,#E18B80
+C62,Slate Purple,#9899B3
+C63,Medium Violet,#8B76A6
+C64,Periwinkle Blue,#7474BA
+C65,Eggplant / Aubergine,#A73AA2
+C66,Rosewood / Red Bean,#724A5F
+C67,Brown Red,#724345
+C68,Coffee Brown,#AA8B6E
+C69,Skin White / Porcelain,#ECD7D5
+C70,Vivid Orange,#ED502A
+C71,Egg Yolk Yellow,#F2962F
+C72,Sand Yellow,#FFF999
+C73,Amber Orange,#E7B067
+C74,Off-White / Gray White,#C0BBA2
+C75,Earth Yellow / Ochre,#B9A16D
+C76,Peach Nougat,#FFD4B9
+C77,Sapphire Blue,#1E4B70
+C78,Deep Ocean Blue,#2675A5
+C79,Sea Blue / Aqua,#00B4D1
+C80,Cerulean Blue,#5482BE
+C81,Military Green,#38453A
+C82,Forest Green,#445C37
+C83,Grass Green,#99A444
+C84,Leaf Green,#56852F
+C85,Bean Green,#70AD92
+C86,Mint Green,#97D4B7
+C87,Soft Teal,#77ADB2
+C88,Powder Blue,#BCCFDF
+C89,Dusty Blue,#96ACCB
+C90,Emerald Green,#54DE37
+C91,Light Spring Green,#D4EC65
+C92,Slate Blue,#778B98
+C93,Dark Slate Blue,#576C7A
+C94,Neutral Gray,#868684

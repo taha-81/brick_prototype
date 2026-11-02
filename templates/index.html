@@ -1,0 +1,127 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo to Bricks</title>
+<style>
+[hidden]{display:none!important}
+body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f4f4f6;color:#222}
+.wrap{max-width:1100px;margin:auto}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+button{padding:8px 14px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}
+button.alt{background:#e5e7eb;color:#222}button.on{background:#111;color:#fff}
+.cards{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.card{background:#fff;border-radius:8px;padding:8px 12px;min-width:90px}
+.card b{display:block;font-size:20px}.card span{font-size:12px;color:#666}
+.views{display:flex;gap:10px;flex-wrap:wrap}.pane{flex:1 1 320px;min-width:0}
+.vp{position:relative;overflow:hidden;background:#222;border-radius:6px;cursor:crosshair}
+.vp img,.vp canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}.vp canvas{image-rendering:pixelated}
+.mk{position:absolute;border:2px solid #fff;outline:1px solid #000;box-sizing:border-box;pointer-events:none}
+#frame{position:relative;overflow:hidden;background:#222;border-radius:6px;touch-action:none;user-select:none;cursor:grab;margin:0 auto 10px}
+#eimg{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;-webkit-user-drag:none;pointer-events:none}
+h4{margin:6px 0}table{border-collapse:collapse;width:100%;background:#fff}td,th{padding:4px 8px;border-bottom:1px solid #eee;text-align:left}
+.sw{display:inline-block;width:16px;height:16px;border:1px solid #999;vertical-align:middle}#err{color:#b91c1c}
+#insp{background:#fff;border-radius:8px;padding:8px 12px;margin:8px 0;min-height:24px}
+input[type=range]{vertical-align:middle;width:110px}
+</style></head><body><div class="wrap">
+<h2>Photo to Bricks (prototype)</h2>
+<div class="row"><input type="file" id="photo" accept="image/png,image/jpeg">
+<select id="size">{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
+<select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
+<button id="go">Convert</button></div>
+<div class="row"><select id="gmode"><option value="off">Grading: Off</option><option value="auto" selected>Grading: Auto</option><option value="custom">Grading: Custom</option></select>
+<label><input type="checkbox" id="boost"> Face boost (experimental)</label>
+<label><input type="checkbox" id="skin" checked> Skin protection</label></div>
+<div class="row" id="sliders" hidden>
+<label>Brightness <input type="range" id="gbr" min="-50" max="50" value="0"></label>
+<label>Contrast <input type="range" id="gct" min="-50" max="50" value="0"></label>
+<label>Colour <input type="range" id="gsat" min="-50" max="50" value="0"></label>
+<label>Sharpness <input type="range" id="gsh" min="0" max="100" value="0"></label></div>
+<div id="editor" hidden>
+<p><b>Adjust your photo.</b> Pinch or use the mouse wheel to zoom the photo, drag to move it. Only what is inside the frame becomes bricks.</p>
+<div id="frame"><img id="eimg" alt=""></div>
+<p id="fstat" style="text-align:center;font-size:13px;margin:0 0 8px"></p>
+<div class="row" style="justify-content:center"><button class="alt" id="zi">Zoom +</button><button class="alt" id="zo">Zoom -</button><button class="alt" id="zr">Reset</button></div>
+</div>
+<p id="err"></p><p id="info"></p>
+<div id="res" hidden>
+<div class="cards" id="stats"></div><p id="verdict"></p><p id="prevline" style="font-size:13px;color:#555"></p>
+<div class="row"><span>Left side:</span><button id="l1" class="on">Photo</button><button id="l2" class="alt" disabled>Previous result</button><span>Right side:</span><button id="m1" class="on">Mosaic</button><button id="m2" class="alt">Error map</button><small>Tap a brick to inspect.</small></div>
+<div id="insp">Tap any brick to compare the photo colour with the brick colour.</div>
+<div class="views">
+<div class="pane"><h4 id="lt">Photo (as framed)</h4><div class="vp" id="vpL"><img id="imgL" alt=""></div></div>
+<div class="pane"><h4 id="rt">Mosaic</h4><div class="vp" id="vpR"><img id="imgR" alt=""><canvas id="cv" hidden></canvas></div></div>
+</div>
+<div class="row"><h4 style="margin:0">Bricks needed</h4><button class="alt" id="csv">Download counts (CSV)</button></div>
+<table id="tbl"><thead><tr><th>Colour</th><th>Code</th><th>Name</th><th>Bricks</th></tr></thead><tbody></tbody></table>
+</div></div><script>
+const $=id=>document.getElementById(id),SZ={{ sizes|tojson }};let D=null,E=null,PV=null;
+/* ---------- photo frame editor: zoom / move the photo, then convert only what is inside the frame ---------- */
+function eApply(){if(!E)return;const im=$('eimg');
+  E.k=Math.min(E.k0*8,Math.max(E.k0,E.k));const W=E.nw*E.k,H=E.nh*E.k;
+  E.ox=Math.min(0,Math.max(E.Fw-W,E.ox));E.oy=Math.min(0,Math.max(E.Fh-H,E.oy));
+  im.style.width=W+'px';im.style.height=H+'px';im.style.transform=`translate(${E.ox}px,${E.oy}px)`}
+function eLayout(){if(!E)return;const [w,h]=SZ[$('size').value],f=$('frame');
+  let Fw=Math.min(440,$('editor').clientWidth),Fh=Fw*h/w;const mh=window.innerHeight*0.7;if(Fh>mh){Fh=mh;Fw=Fh*w/h}
+  f.style.width=Fw+'px';f.style.height=Fh+'px';const first=E.k===undefined;E.Fw=Fw;E.Fh=Fh;E.k0=Math.max(Fw/E.nw,Fh/E.nh);
+  if(first){E.k=E.k0;E.ox=(Fw-E.nw*E.k)/2;E.oy=(Fh-E.nh*E.k)/2}eApply()}
+function eZoom(px,py,f){const nk=Math.min(E.k0*8,Math.max(E.k0,E.k*f)),r=nk/E.k;E.ox=px-(px-E.ox)*r;E.oy=py-(py-E.oy)*r;E.k=nk;eApply()}
+function cropBox(){return{cx:-E.ox/(E.nw*E.k),cy:-E.oy/(E.nh*E.k),cw:E.Fw/(E.nw*E.k),ch:E.Fh/(E.nh*E.k)}}
+(()=>{const fr=$('frame'),P=new Map();let pd=0;
+  fr.addEventListener('wheel',e=>{if(!E)return;e.preventDefault();const r=fr.getBoundingClientRect();eZoom(e.clientX-r.left,e.clientY-r.top,e.deltaY<0?1.15:1/1.15)},{passive:false});
+  fr.addEventListener('pointerdown',e=>{fr.setPointerCapture(e.pointerId);P.set(e.pointerId,[e.clientX,e.clientY]);pd=0});
+  fr.addEventListener('pointermove',e=>{if(!E||!P.has(e.pointerId))return;const o=P.get(e.pointerId);P.set(e.pointerId,[e.clientX,e.clientY]);
+    if(P.size==2){const [a,b]=[...P.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);
+      if(pd){const r=fr.getBoundingClientRect();eZoom((a[0]+b[0])/2-r.left,(a[1]+b[1])/2-r.top,d/pd)}pd=d}
+    else{E.ox+=e.clientX-o[0];E.oy+=e.clientY-o[1];eApply()}});
+  const up=e=>{P.delete(e.pointerId);pd=0};fr.addEventListener('pointerup',up);fr.addEventListener('pointercancel',up)})();
+$('zi').onclick=()=>E&&eZoom(E.Fw/2,E.Fh/2,1.25);$('zo').onclick=()=>E&&eZoom(E.Fw/2,E.Fh/2,1/1.25);
+function cover(){E.k=E.k0;E.ox=(E.Fw-E.nw*E.k)/2;E.oy=(E.Fh-E.nh*E.k)/2;eApply()}
+function frameOnFace(){const f=E.face;E.k=Math.max(E.k0,0.40*E.Fh/(f.h*E.nh));E.ox=E.Fw/2-f.cx*E.nw*E.k;E.oy=E.Fh*0.42-f.cy*E.nh*E.k;eApply()}
+$('zr').onclick=()=>{if(!E)return;E.face?frameOnFace():cover()};
+$('photo').onchange=()=>{const f=$('photo').files[0];if(!f)return;const im=$('eimg');
+  im.onload=async()=>{E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Looking for a face...';
+    try{const fd=new FormData();fd.append('photo',f);const d=await (await fetch('/detect',{method:'POST',body:fd})).json();const mine=E;
+      if(d.face){mine.face=d.face;frameOnFace();$('fstat').textContent='Face found. The frame is centred on it, you can still move the photo.'}
+      else $('fstat').textContent=d.unavailable?'Face detection is off: '+d.unavailable+' Place the photo yourself.':'No front-facing face found. Place the photo yourself.'}catch(e){$('fstat').textContent=''}};im.src=URL.createObjectURL(f)};
+$('size').onchange=()=>{eLayout();if(E&&E.face)frameOnFace()};
+/* ---------- result view ---------- */
+function layout(){if(D)['vpL','vpR'].forEach(i=>{const v=$(i);v.style.height=(v.clientWidth*D.h/D.w)+'px'});eLayout()}
+window.addEventListener('resize',layout);
+const hex=c=>'#'+c.slice(0,3).map(v=>v.toString(16).padStart(2,'0')).join('');
+function inspect(x,y){if(x<0||y<0||x>=D.w||y>=D.h)return;const c=D.cells[y*D.w+x],p=D.palette[c[3]];
+  document.querySelectorAll('.mk').forEach(m=>m.remove());
+  ['vpL','vpR'].forEach(i=>{const m=document.createElement('div');m.className='mk';
+    m.style.cssText=`left:${x/D.w*100}%;top:${y/D.h*100}%;width:${100/D.w}%;height:${100/D.h}%`;$(i).appendChild(m)});
+  const q=c[5]<=2?'very close':c[5]<=5?'close, small difference':'clearly different';
+  $('insp').innerHTML=`Brick (${x+1}, ${y+1}): target <span class="sw" style="background:${hex(c)}"></span> ${hex(c)} &rarr; brick <span class="sw" style="background:${p[2]}"></span> ${p[0]} ${p[1]} (${p[2]}) &mdash; brick on its own &Delta;E ${c[4]}; with neighbours <b>&Delta;E ${c[5]}</b> (${q})`}
+['vpL','vpR'].forEach(i=>$(i).addEventListener('click',e=>{if(!D)return;const r=$(i).getBoundingClientRect(),cw=r.width/D.w;
+  inspect(Math.floor((e.clientX-r.left)/cw),Math.floor((e.clientY-r.top)/cw))}));
+function heat(){const cv=$('cv');cv.width=D.w;cv.height=D.h;const g=cv.getContext('2d'),im=g.createImageData(D.w,D.h);
+  D.cells.forEach((c,i)=>{const t=Math.min(c[5]/10,1),r=t<.5?t*2*255:255,gg=t<.5?200:200*(1-(t-.5)*2);im.data.set([r,gg,40,255],i*4)});g.putImageData(im,0,0)}
+function setMode(m){$('imgR').hidden=m==2;$('cv').hidden=m==1;$('m1').className=m==1?'on':'alt';$('m2').className=m==2?'on':'alt';
+  $('rt').textContent=m==1?'Mosaic':'Error map (green = exact, yellow = ok, red = difference of 10+)'}
+$('csv').onclick=()=>{if(!D)return;const rows=[['code','name','hex','bricks'],...D.colours.map(c=>[c.code,'"'+c.name+'"',c.hex,c.count]),['TOTAL','','',D.total],
+  ['SIZE','"'+D.studs+' studs, '+D.cm+' cm, '+D.plates+' baseplates"','','']];
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='brick_counts.csv';a.click()};
+const statLine=s=>`Delta E vs your photo ${s.vs_orig} | face structure ${s.face_structure??'n/a'} | face detail ${s.face_detail??'n/a'}`;
+function setLeft(m){if(!D)return;if(m==2&&!PV)m=1;$('l1').className=m==1?'on':'alt';$('l2').className=m==2?'on':'alt';
+  $('imgL').src=m==1?D.original:PV.preview;$('lt').textContent=m==1?'Photo (as framed)':'Previous result';
+  $('prevline').textContent=PV?'Previous: '+statLine(PV.stats)+'  |  Now: '+statLine(D.stats):''}
+$('l1').onclick=()=>setLeft(1);$('l2').onclick=()=>setLeft(2);
+$('gmode').onchange=()=>{$('sliders').hidden=$('gmode').value!='custom'};
+$('m1').onclick=()=>setMode(1);$('m2').onclick=()=>setMode(2);
+$('go').onclick=async()=>{
+  $('err').textContent='';const f=$('photo').files[0];
+  if(!f||!E){$('err').textContent='Choose a photo first.';return}
+  const fd=new FormData();fd.append('photo',f);fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');
+  const b=cropBox();for(const k in b)fd.append(k,b[k]);$('go').disabled=true;$('go').textContent='Converting...';
+  try{const r=await fetch('/convert',{method:'POST',body:fd});const d=await r.json();
+    if(!r.ok){$('err').textContent=d.error;return}
+    PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
+    $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
+    $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total`;
+    const s=d.stats;$('stats').innerHTML=[['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
+      .map(a=>`<div class="card"><b>${a[1]}</b><span>${a[0]}</span></div>`).join('');
+    $('verdict').innerHTML='&Delta;E is the colour difference (CIEDE2000, against the Excel hex colours). "Per brick" compares each brick alone with its photo cell. "Blended" compares each brick with its 8 neighbours averaged, which is what your eye sees from a distance and is the fair number once dithering is on. Under 2 is almost invisible, 2 to 5 small, above 5 clearly different. "vs your photo" compares with your untouched photo, so grading raises it on purpose. "Face structure" and "Face detail" run from 0 to 1: higher means the face shapes, then fine details like eyes and lips, survived better.';
+    $('tbl').querySelector('tbody').innerHTML=d.colours.map(c=>
+      `<tr><td><span class="sw" style="background:${c.hex}"></span></td><td>${c.code}</td><td>${c.name}</td><td>${c.count}</td></tr>`).join('');
+    layout();$('res').scrollIntoView({behavior:'smooth'});
+  }catch(e){$('err').textContent='Something went wrong.'}finally{$('go').disabled=false;$('go').textContent='Convert'}
+};
+</script></body></html>
