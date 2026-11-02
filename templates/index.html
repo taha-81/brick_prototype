@@ -19,7 +19,7 @@ h4{margin:6px 0}table{border-collapse:collapse;width:100%;background:#fff}td,th{
 #insp{background:#fff;border-radius:8px;padding:8px 12px;margin:8px 0;min-height:24px}
 input[type=range]{vertical-align:middle;width:110px}
 </style></head><body><div class="wrap">
-<h2>Photo to Bricks (prototype)</h2>
+<h2>Photo to Bricks (prototype) <small style="font-weight:normal;font-size:12px;color:#888">version {{ version }}</small></h2>
 <div class="row"><input type="file" id="photo" accept="image/png,image/jpeg">
 <select id="size">{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
 <select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
@@ -49,8 +49,8 @@ input[type=range]{vertical-align:middle;width:110px}
 </div>
 <div class="row"><h4 style="margin:0">Bricks needed</h4><button class="alt" id="csv">Download counts (CSV)</button></div>
 <table id="tbl"><thead><tr><th>Colour</th><th>Code</th><th>Name</th><th>Bricks</th></tr></thead><tbody></tbody></table>
-</div></div><script>
-const $=id=>document.getElementById(id),SZ={{ sizes|tojson }};let D=null,E=null,PV=null;
+</div></div><script id="boot" type="application/json">{{ boot|tojson }}</script><script>
+const $=id=>document.getElementById(id),BOOT=JSON.parse(document.getElementById('boot').textContent),SZ=BOOT.sizes;let D=null,E=null,PV=null;
 /* ---------- photo frame editor: zoom / move the photo, then convert only what is inside the frame ---------- */
 async function shrink(im){let side=2000,blob;  // phone photos are huge; the server only needs about 2000 px
   for(let i=0;i<4;i++){const sc=Math.min(1,side/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement('canvas');
@@ -123,6 +123,7 @@ $('go').onclick=async()=>{
   try{const r=await fetch('/convert',{method:'POST',body:fd});let d;
     try{d=await r.json()}catch(_){$('err').textContent=r.status==413?'The photo is too large for the server.':'The server could not finish (error '+r.status+'). Try a smaller size.';return}
     if(!r.ok){$('err').textContent=d.error;return}
+    if(d.version!==BOOT.version)$('err').textContent='Page and server are different versions. Press Ctrl+F5.';
     d.original=origURL;PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
     $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
     $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total`;

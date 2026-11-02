@@ -1,10 +1,13 @@
 """Photo -> brick mosaic prototype (Day 1): upload, size, palette match, preview, counts."""
 import base64, csv, io, math, os
+from typing import Any
 import numpy as np
 from flask import Flask, jsonify, render_template, request
 from PIL import Image, ImageDraw, ImageOps
 
-cv2, _FACE, FACE_WHY = None, None, ""
+cv2: Any = None
+_FACE: Any = None
+FACE_WHY = ""
 try:
     import cv2
     if not hasattr(cv2, "CascadeClassifier"):  # OpenCV 5 removed the face detector
@@ -18,6 +21,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
+APP_VERSION = "day3-shrink-1"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -59,7 +63,7 @@ def srgb_to_lab(rgb):
     f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
     return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
 
-def ciede2000(p, q):
+def ciede2000(p, q) -> np.ndarray:
     """Strict colour difference (CIEDE2000). p: (N,1,3) Lab, q: (1,M,3) Lab -> (N,M)."""
     L1, a1, b1 = p[..., 0], p[..., 1], p[..., 2]
     L2, a2, b2 = q[..., 0], q[..., 1], q[..., 2]
@@ -148,10 +152,14 @@ def dither_match(lab, strength, skin=None):
                     work[yy, xx] += err * wt
     return idx
 
-def blur3(a):
+def blur3(a) -> np.ndarray:
     h, w, _ = a.shape
     p = np.pad(a, ((1, 1), (1, 1), (0, 0)), mode="edge")
-    return sum(p[dy:dy + h, dx:dx + w] for dy in range(3) for dx in range(3)) / 9
+    acc = np.zeros(a.shape, float)
+    for dy in range(3):
+        for dx in range(3):
+            acc += p[dy:dy + h, dx:dx + w]
+    return acc / 9
 
 def blurL(L):
     return blur3(np.stack([L] * 3, -1))[..., 0]
@@ -187,13 +195,13 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
     """Return the brick matrix (single source of truth), target colours, errors and face measures."""
     grade = grade or dict(mode="off", br=0, ct=0, sat=0, sh=0)
     img = ImageOps.exif_transpose(img).convert("RGB")  # match how the browser shows phone photos
-    img.thumbnail((2500, 2500), Image.LANCZOS)  # far more detail than 240 bricks can use; crop fractions stay valid
+    img.thumbnail((2500, 2500), Image.Resampling.LANCZOS)  # far more detail than 240 bricks can use; crop fractions stay valid
     if box:  # (x, y, width, height) as fractions of the photo, set by the person in the frame editor
         iw, ih = img.size
         crop = img.crop((round(box[0] * iw), round(box[1] * ih), round((box[0] + box[2]) * iw), round((box[1] + box[3]) * ih)))
     else:
         crop = center_crop(img, w, h)
-    rgb0 = np.asarray(crop.resize((w, h), Image.BOX), float)  # average photo colour per cell, untouched
+    rgb0 = np.asarray(crop.resize((w, h), Image.Resampling.BOX), float)  # average photo colour per cell, untouched
     orig_lab = srgb_to_lab(rgb0.reshape(-1, 3)).reshape(h, w, 3)
     face = detect_face(crop)
     m = face_mask(w, h, crop.size, face)
@@ -229,7 +237,7 @@ def render(matrix, cell=16):
 
 @app.route("/")
 def index():
-    return render_template("index.html", sizes=SIZES, groups=SIZE_GROUPS)
+    return render_template("index.html", groups=SIZE_GROUPS, version=APP_VERSION, boot=dict(sizes=SIZES, version=APP_VERSION))
 
 @app.route("/convert", methods=["POST"])
 def do_convert():
@@ -258,7 +266,7 @@ def do_convert():
     assert counts.sum() == w * h  # quantities must equal total cells
     rows = [dict(code=PALETTE[i]["code"], name=PALETTE[i]["name"], hex=PALETTE[i]["hex"], count=int(c))
             for i, c in enumerate(counts) if c]
-    rows.sort(key=lambda r: -r["count"])
+    rows.sort(key=lambda r: -int(r["count"]))
     buf = io.BytesIO(); render(m, cell=max(5, min(16, 1600 // max(w, h)))).save(buf, "JPEG", quality=92, subsampling=0)  # smaller bricks on huge mosaics keeps the picture a sensible size
     flat = m.ravel()
     cells = [[int(round(r)), int(round(g)), int(round(b)), int(i), round(float(e0), 2), round(float(e), 2)] for (r, g, b), i, e0, e in zip(photo_rgb, flat, raw, de)]
@@ -267,7 +275,7 @@ def do_convert():
                  over5=round(float((de > 5).mean() * 100), 1), raw_mean=round(float(raw.mean()), 2),
                  vs_orig=round(float(vs_orig.mean()), 2), face_structure=structure, face_detail=detail)
     return jsonify(preview="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
-                   cells=cells, stats=stats, w=w, h=h, face=face,
+                   cells=cells, stats=stats, w=w, h=h, face=face, version=APP_VERSION,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",
                    plates=(w // PLATE_STUDS) * (h // PLATE_STUDS), total=w * h, colours=rows)
@@ -277,6 +285,8 @@ def detect():
     if _FACE is None:  # OpenCV is not installed: say so instead of pretending no face exists
         return jsonify(face=None, unavailable=FACE_WHY)
     f = request.files.get("photo")
+    if f is None:
+        return jsonify(face=None)
     try:
         img = ImageOps.exif_transpose(Image.open(f.stream)).convert("RGB")
     except Exception:
