@@ -250,7 +250,9 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
         crop = img.crop((round(box[0] * iw), round(box[1] * ih), round((box[0] + box[2]) * iw), round((box[1] + box[3]) * ih)))
     else:
         crop = center_crop(img, w, h)
-    rgb0 = np.asarray(crop.resize((w, h), Image.Resampling.BOX), float)  # average photo colour per cell, untouched
+    upscaled = crop.width < w or crop.height < h
+    resampling = Image.Resampling.LANCZOS if upscaled else Image.Resampling.BOX
+    rgb0 = np.asarray(crop.resize((w, h), resampling), float)  # interpolate small photos; average larger photos per cell
     orig_lab = srgb_to_lab(rgb0.reshape(-1, 3)).reshape(h, w, 3)
     face = detect_face(crop)
     m = face_mask(w, h, crop.size, face)
@@ -326,7 +328,7 @@ def do_convert():
                  over5=round(float((de > 5).mean() * 100), 1), raw_mean=round(float(raw.mean()), 2),
                  vs_orig=round(float(vs_orig.mean()), 2), face_structure=structure, face_detail=detail)
     return jsonify(preview="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
-                   cells=cells, stats=stats, w=w, h=h, face=face, version=APP_VERSION,
+                   cells=cells, stats=stats, w=w, h=h, face=face, upscaled=crop.width < w or crop.height < h, version=APP_VERSION,
                    used=len(rows), limit=MAX_COLOURS if request.form.get("limit", "0") == "1" else None,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",
