@@ -21,7 +21,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day4-colour-limit-1"
+APP_VERSION = "day4-colour-limit-2"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -208,22 +208,27 @@ def blur3(a) -> np.ndarray:
 def blurL(L):
     return blur3(np.stack([L] * 3, -1))[..., 0]
 
+LUMA = np.array([0.2126, 0.7152, 0.0722])
+
 def grade_small(rgb, g):
-    """Grade the photo at brick resolution (this is the size that matters): levels, brightness, contrast, colour, sharpness."""
+    """Grade the photo at brick resolution (this is the size that matters): levels, brightness, contrast, colour, sharpness.
+    Auto mode only changes LIGHTNESS (the same gain on red, green and blue), so skin never gets redder or more colourful."""
     if g["mode"] == "off":
         return rgb
     x = rgb.copy()
-    lum = x @ np.array([0.2126, 0.7152, 0.0722])
     if g["mode"] == "auto":
+        lum = x @ LUMA
         lo, hi = np.percentile(lum, 1), np.percentile(lum, 99)
         if hi - lo > 20:
-            x = x + 0.7 * ((x - lo) * (255 / (hi - lo)) - x)  # stretch the tones, 70% of the way
-        g = dict(g, br=0, ct=0, sat=10, sh=40)
+            target = lum + 0.7 * ((lum - lo) * (255 / (hi - lo)) - lum)  # stretch the tones, 70% of the way
+            x = x * np.clip(target / np.maximum(lum, 1), 0.6, 1.8)[..., None]  # same gain on R, G and B: hue and colour strength stay
+        g = dict(g, br=0, ct=0, sat=0, sh=40)
     x = x + g["br"] * 1.28
     x = (x - 128) * (1 + g["ct"] / 100) + 128
-    gray = (x @ np.array([0.2126, 0.7152, 0.0722]))[..., None]
+    gray = (x @ LUMA)[..., None]
     x = gray + (x - gray) * (1 + g["sat"] / 100)
-    x = x + (g["sh"] / 100 * 1.5) * (x - blur3(x))
+    lum = x @ LUMA  # sharpen lightness only, so edges get crisper without coloured fringes
+    x = x + (g["sh"] / 100 * 1.5) * (lum - blurL(lum))[..., None]
     return np.clip(x, 0, 255)
 
 def face_metrics(orig_lab, brick_lab, m):
