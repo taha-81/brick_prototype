@@ -80,6 +80,25 @@ small{color:var(--mute)}
 .hint{font-size:13px;color:var(--mute);line-height:1.4}
 select{font:inherit;font-size:15px;color:var(--ink);background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:9px 10px;width:100%;max-width:100%;min-width:0;text-overflow:ellipsis}
 .two{display:flex;gap:14px;flex-wrap:wrap}
+.size-picker{margin-bottom:18px}
+.size-picker>.field{margin-bottom:10px}
+.orientation-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;margin:0 0 12px;background:var(--soft);border-radius:10px}
+.orientation-tab{position:relative;display:grid;justify-items:center;gap:2px;padding:8px 4px 10px;background:transparent;color:var(--mute);border-radius:7px;font-size:13px;font-weight:400}
+.orientation-tab:hover:not(:disabled){filter:none;background:color-mix(in srgb,var(--panel) 70%,transparent)}
+.orientation-tab[aria-pressed=true]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.orientation-tab[aria-pressed=true]::after{content:"";position:absolute;left:20%;right:20%;bottom:4px;height:3px;border-radius:2px;background:var(--yellow)}
+.orientation-icon{display:block;width:17px;height:17px;border:2px solid currentColor;border-radius:3px}
+.orientation-tab[data-orientation-tab="Landscape"] .orientation-icon{width:22px;height:14px}
+.orientation-tab[data-orientation-tab="Portrait"] .orientation-icon{width:13px;height:21px}
+.size-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.size-option{display:flex;min-width:0;min-height:124px;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:9px 5px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:9px;font-weight:400;text-align:center;transition:border-color .15s,background .15s,box-shadow .15s}
+.size-option:hover:not(:disabled){filter:none;border-color:var(--blue)}
+.size-option[aria-pressed=true]{border:2px solid var(--blue);padding:8px 4px;background:color-mix(in srgb,var(--blue) 6%,var(--panel));box-shadow:0 2px 6px rgba(0,0,0,.08)}
+.plate-grid{display:grid;grid-template-columns:repeat(var(--plate-cols),7px);grid-auto-rows:7px;gap:2px;max-width:100%;margin:1px auto 2px}
+.plate-grid span{display:block;border-radius:1px;background:#62666b}
+.size-dimensions{font-size:14px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap}
+.size-plate-count{font-size:12px;color:var(--mute);line-height:1.2}
+@media(max-width:520px){.size-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.size-option{min-height:116px}}
 .toggles{display:grid;gap:8px;margin:4px 0 6px}
 .toggles label{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:start;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;font-weight:700;font-size:15px}
 .toggles input{margin:3px 0 0;width:18px;height:18px;accent-color:var(--blue);grid-row:span 2}
@@ -187,10 +206,30 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   <p id="fname" hidden></p>
 
   <div class="step"><span class="num">2</span><h3>Pick a size and look</h3></div>
-  <label class="field"><span>Mosaic size</span>
-    <select id="size">{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
-    <span class="hint">Each baseplate is 24 x 24 studs (19.2 cm). More plates means more bricks and more detail.</span>
-  </label>
+  <div class="size-picker">
+    <label class="field"><span>Mosaic size</span>
+      <select id="size" hidden>{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
+      <span class="hint">Each baseplate is 24 x 24 studs (19.2 cm). More plates means more bricks and more detail.</span>
+    </label>
+    <div class="orientation-tabs" role="group" aria-label="Mosaic orientation">
+      {% for orientation in ['Square','Landscape','Portrait'] %}
+      <button type="button" class="orientation-tab" data-orientation-tab="{{orientation}}" aria-pressed="{{'true' if orientation=='Square' else 'false'}}">
+        <span class="orientation-icon" aria-hidden="true"></span>{{orientation}}
+      </button>
+      {% endfor %}
+    </div>
+    {% for orientation in ['Square','Landscape','Portrait'] %}
+    <div class="size-grid" data-orientation-panel="{{orientation}}"{% if orientation!='Square' %} hidden{% endif %}>
+      {% for group in groups %}{% if group[0]==orientation %}{% for r in group[1] %}
+      <button type="button" class="size-option" data-size-option="{{r.key}}" aria-pressed="{{'true' if r.key=='2x2' else 'false'}}">
+        <span class="plate-grid" style="--plate-cols:{{r.key.split('x')[0]}}" aria-hidden="true">{% for plate in range((r.key.split('x')[0]|int) * (r.key.split('x')[1]|int)) %}<span></span>{% endfor %}</span>
+        <span class="size-dimensions">{{r.label.split(',')[2]|replace('x',' × ')}}</span>
+        <span class="size-plate-count">{{r.key}} plates</span>
+      </button>
+      {% endfor %}{% endif %}{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
   <div class="two">
     <label class="field"><span>Colour mixing</span>
       <select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
@@ -361,5 +400,16 @@ $('go').onclick=async()=>{
     document.getElementById('boost').checked=false;document.getElementById('skin').checked=true};
   document.getElementById('preSmall').onclick=()=>preset('soft','auto');
   document.getElementById('preLarge').onclick=()=>preset('normal','auto');
+  const size=document.getElementById('size'),tabs=[...document.querySelectorAll('[data-orientation-tab]')];
+  const panels=[...document.querySelectorAll('[data-orientation-panel]')],options=[...document.querySelectorAll('[data-size-option]')];
+  const showOrientation=orientation=>{tabs.forEach(tab=>tab.setAttribute('aria-pressed',String(tab.dataset.orientationTab===orientation)));
+    panels.forEach(panel=>panel.hidden=panel.dataset.orientationPanel!==orientation)};
+  const syncSize=()=>{const selected=options.find(option=>option.dataset.sizeOption===size.value);
+    options.forEach(option=>option.setAttribute('aria-pressed',String(option===selected)));
+    if(selected)showOrientation(selected.closest('[data-orientation-panel]').dataset.orientationPanel)};
+  tabs.forEach(tab=>tab.addEventListener('click',()=>showOrientation(tab.dataset.orientationTab)));
+  options.forEach(option=>option.addEventListener('click',()=>{size.value=option.dataset.sizeOption;size.dispatchEvent(new Event('change',{bubbles:true}))}));
+  size.addEventListener('change',syncSize);
+  syncSize();
 })();
 </script></body></html>
