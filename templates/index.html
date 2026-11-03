@@ -122,6 +122,19 @@ input[type=range]{accent-color:var(--blue);width:120px}
 .drop input{font:inherit;font-size:14px;max-width:100%}
 #fname{font-size:13px;color:var(--mute);margin:0}
 
+/* skin tone adjustment */
+.skin-box{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:4px 0 6px}
+.skin-head{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:start;cursor:pointer;font-weight:700;font-size:15px}
+.skin-head input{margin:3px 0 0;width:18px;height:18px;accent-color:var(--blue);grid-row:span 2}
+.skin-head .hint{font-weight:400}
+#skPanel{margin-top:10px;display:grid;gap:8px}
+#skPanel .sl{display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:10px;font-size:14px}
+#skPanel .sl input[type=range]{width:100%}
+#skPanel output{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+#skPanel .presets{gap:6px;margin:2px 0 0}
+#skPanel .presets button{font-size:13px;padding:6px 10px;background:var(--panel)}
+#skPanel p.hint{margin:0}
+
 /* tips */
 details.tips{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:14px 0 18px}
 details.tips summary{cursor:pointer;font-weight:700}
@@ -254,6 +267,16 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
       <span class="hint">Adjusts brightness, contrast and colour before bricks are picked.</span>
     </label>
   </div>
+  <div class="two">
+    <label class="field"><span>Number of colours</span>
+      <select id="climit"><option value="min" selected>Fewest colours (recommended)</option><option value="balanced">Balanced</option><option value="max">Most detail (up to 50)</option></select>
+      <span class="hint">Picks the smallest set of brick colours that still matches the picture. Never more than 50 of the 94 colours.</span>
+    </label>
+    <label class="field"><span>Image type</span>
+      <select id="profile"><option value="auto" selected>Detect automatically</option><option value="flat">Flat graphic (flag, logo, cartoon)</option><option value="photo">Photograph</option></select>
+      <span class="hint">Flat graphics get sharp edges and one brick per colour area, with no colour mixing. Photos keep shading and skin detail.</span>
+    </label>
+  </div>
   <div class="row" id="sliders" hidden>
     <label>Brightness <input type="range" id="gbr" min="-50" max="50" value="0"></label>
     <label>Contrast <input type="range" id="gct" min="-50" max="50" value="0"></label>
@@ -262,18 +285,31 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   </div>
   <div class="toggles">
     <label><input type="checkbox" id="skin" checked> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
-    <label><input type="checkbox" id="lim" checked> Limit to 55 colours <span class="hint">Picks the best 55 of the 94 colours for this photo, so fewer brick types are needed. Untick to use all 94.</span></label>
     <label><input type="checkbox" id="boost"> Face boost (experimental) <span class="hint">Extra contrast on the face only. Best left off for now.</span></label>
+  </div>
+
+  <div class="skin-box">
+    <label class="skin-head"><input type="checkbox" id="skOn"> Skin tone adjustment <span class="hint">Changes skin only. Clothes, hair and background stay exactly as they are. Needs a detected face.</span></label>
+    <div id="skPanel" hidden>
+      <label class="sl"><span>Brightness</span><input type="range" id="skBr" min="-50" max="50" value="0"><output for="skBr" id="skBrV">0</output></label>
+      <label class="sl"><span>Warmth</span><input type="range" id="skWarm" min="-50" max="50" value="0"><output for="skWarm" id="skWarmV">0</output></label>
+      <label class="sl"><span>Colour strength</span><input type="range" id="skSat" min="-50" max="50" value="0"><output for="skSat" id="skSatV">0</output></label>
+      <div class="row presets"><span class="hint">Quick picks:</span>
+        <button type="button" class="alt" data-sk="20,0,0">Lighter</button><button type="button" class="alt" data-sk="-20,0,0">Darker</button>
+        <button type="button" class="alt" data-sk="0,20,0">Warmer</button><button type="button" class="alt" data-sk="0,-20,0">Cooler</button>
+        <button type="button" class="alt" data-sk="6,4,-10">Natural</button><button type="button" class="alt" id="skReset">Reset</button></div>
+      <p class="hint">At 0 / 0 / 0 nothing is changed. Minus values darken, cool or mute; plus values lighten, warm or strengthen.</p>
+    </div>
   </div>
 
   <details class="tips">
     <summary>Recommended settings</summary>
     <div class="tipgrid">
       <div><h5>Small mosaics (3x3 to 5x5 plate units)</h5>
-        <p>Dithering Soft, Grading Auto, Skin protection on, Face boost off. Zoom in so the face fills most of the frame.</p>
+        <p>Dithering Soft, Grading Auto, Fewest colours, Skin protection on, Face boost off. Zoom in so the face fills most of the frame.</p>
         <button type="button" class="alt" id="preSmall">Use small settings</button></div>
       <div><h5>Large mosaics (6 or more plate units per side)</h5>
-        <p>Dithering Normal, Grading Auto, Skin protection on, Face boost off. Zoom out a little to include hair and shoulders.</p>
+        <p>Dithering Normal, Grading Auto, Fewest colours, Skin protection on, Face boost off. Zoom out a little to include hair and shoulders. Flags, logos and cartoons: leave Image type on automatic, they are detected and converted with the fewest possible colours and no mixing.</p>
         <button type="button" class="alt" id="preLarge">Use large settings</button></div>
     </div>
   </details>
@@ -383,7 +419,7 @@ $('go').onclick=async()=>{
   if(!f||!E){$('err').textContent='Choose a photo first.';return}
   if(!$('size').value){$('err').textContent='Enter a valid mosaic size.';return}
   if(!E.blob){$('err').textContent='The photo is still being prepared. Try again in a moment.';return}
-  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('limit',$('lim').checked?'1':'0');
+  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('colours',$('climit').value);fd.append('profile',$('profile').value);fd.append('sk_on',$('skOn').checked?'1':'0');fd.append('sk_br',$('skBr').value);fd.append('sk_warm',$('skWarm').value);fd.append('sk_sat',$('skSat').value);
   const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh);$('go').disabled=true;$('go').textContent='Converting...';
   try{const r=await fetch('/convert',{method:'POST',body:fd});let d;
     try{d=await r.json()}catch(_){$('err').textContent=r.status==413?'The photo is too large for the server.':'The server could not finish (error '+r.status+'). Try a smaller size.';return}
@@ -391,10 +427,10 @@ $('go').onclick=async()=>{
     if(d.version!==BOOT.version)$('err').textContent='Page and server are different versions. Press Ctrl+F5.';
     d.original=origURL;PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
     $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
-    $('info').textContent=`${d.studs} studs | ${d.cm} cm | frame opening ${d.frame_cm} | ${d.plates} plate units | ${d.total} bricks total | ${d.used} colours used${d.limit?' (limit '+d.limit+')':''}${d.upscaled?' | Low-resolution photo smoothly enlarged; no new detail is recovered.':''}`;
-    const s=d.stats;$('stats').innerHTML=[['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
+    $('info').textContent=`${d.studs} studs | ${d.cm} cm | frame opening ${d.frame_cm} | ${d.plates} plate units | ${d.total} bricks total | ${d.used} colours used (max ${d.limit}) | ${d.report.profile=='flat'?'flat graphic':'photograph'}${d.report.profile=='flat'?' ('+d.report.regions+' colour areas, no mixing)':''}${d.report.skin_cells?' | skin: '+d.report.skin_cells+'% of bricks':''}${d.upscaled?' | Low-resolution photo smoothly enlarged; no new detail is recovered.':''}`;
+    const s=d.stats;$('stats').innerHTML=[['Colours used (max '+d.limit+')',d.used],['Image type',d.report.profile=='flat'?'Flat graphic':'Photo'],['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
       .map(a=>`<div class="card"><b>${a[1]}</b><span>${a[0]}</span></div>`).join('');
-    $('verdict').innerHTML='&Delta;E is the colour difference (CIEDE2000, against the Excel hex colours). "Per brick" compares each brick alone with its photo cell. "Blended" compares each brick with its 8 neighbours averaged, which is what your eye sees from a distance and is the fair number once dithering is on. Under 2 is almost invisible, 2 to 5 small, above 5 clearly different. "vs your photo" compares with your untouched photo, so grading raises it on purpose. "Face structure" and "Face detail" run from 0 to 1: higher means the face shapes, then fine details like eyes and lips, survived better.';
+    $('verdict').innerHTML='&Delta;E is the colour difference (CIEDE2000, against the Excel hex colours). "Per brick" compares each brick alone with its photo cell. "Blended" compares each brick with its 8 neighbours averaged, which is what your eye sees from a distance and is the fair number once dithering is on. Under 2 is almost invisible, 2 to 5 small, above 5 clearly different. "vs your photo" compares with your untouched photo, so grading raises it on purpose. "Face structure" and "Face detail" run from 0 to 1: higher means the face shapes, then fine details like eyes and lips, survived better. "Colours used" is the number of different bricks in the final mosaic: the smallest set that still matches the picture, never more than 50. Flat graphics (flags, logos, cartoons) get one brick per colour area and no mixing, so edges stay sharp.';
     $('tbl').querySelector('tbody').innerHTML=d.colours.map(c=>
       `<tr><td><span class="sw" style="background:${c.hex}"></span></td><td>${c.code}</td><td>${c.name}</td><td>${c.count}</td></tr>`).join('');
     layout();$('res').scrollIntoView({behavior:'smooth'});
@@ -412,7 +448,16 @@ $('go').onclick=async()=>{
     if(!fs||!fs.length)return;if(!/^image\/(png|jpeg)$/.test(fs[0].type)){document.getElementById('err').textContent='Please drop a JPG or PNG photo.';return}
     document.getElementById('err').textContent='';const dt=new DataTransfer();dt.items.add(fs[0]);inp.files=dt.files;inp.dispatchEvent(new Event('change'))});
   const preset=(d,g)=>{document.getElementById('dither').value=d;const gm=document.getElementById('gmode');gm.value=g;gm.dispatchEvent(new Event('change'));
-    document.getElementById('boost').checked=false;document.getElementById('skin').checked=true};
+    document.getElementById('boost').checked=false;document.getElementById('skin').checked=true;document.getElementById('climit').value='min'};
+  /* skin tone adjustment panel: show values, quick picks, reset */
+  const skOn=document.getElementById('skOn'),skPanel=document.getElementById('skPanel'),sk={br:'skBr',warm:'skWarm',sat:'skSat'};
+  const skShow=()=>Object.values(sk).forEach(id=>{const v=+document.getElementById(id).value;document.getElementById(id+'V').textContent=(v>0?'+':'')+v});
+  const skSet=(br,warm,sat)=>{document.getElementById('skBr').value=br;document.getElementById('skWarm').value=warm;document.getElementById('skSat').value=sat;skShow()};
+  skOn.addEventListener('change',()=>{skPanel.hidden=!skOn.checked});
+  Object.values(sk).forEach(id=>document.getElementById(id).addEventListener('input',skShow));
+  document.querySelectorAll('[data-sk]').forEach(b=>b.addEventListener('click',()=>{const [br,warm,sat]=b.dataset.sk.split(',').map(Number);skSet(br,warm,sat)}));
+  document.getElementById('skReset').addEventListener('click',()=>skSet(0,0,0));
+  skShow();
   document.getElementById('preSmall').onclick=()=>preset('soft','auto');
   document.getElementById('preLarge').onclick=()=>preset('normal','auto');
   const size=document.getElementById('size'),tabs=[...document.querySelectorAll('[data-orientation-tab]')];

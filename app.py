@@ -1,4 +1,5 @@
-"""Photo -> brick mosaic prototype (Day 1): upload, size, palette match, preview, counts."""
+"""Photo -> brick mosaic prototype: upload, size, palette match, preview, counts.
+Day 5: minimum-colour optimisation (flat-graphic and photo profiles), strict 50-colour cap, skin tone adjustment."""
 import base64, csv, io, math, os
 import re
 from typing import Any
@@ -22,7 +23,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day4-colour-limit-2"
+APP_VERSION = "day5-min-colours-1"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -36,7 +37,13 @@ FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-
 STUD_CM, PLATE_STUDS = 0.8, 16  # client module: 16x16 studs (12.8 cm)
 MAX_PLATE_UNITS = 12
 DEFAULT_SIZE = "3x3"
-MAX_COLOURS = 55  # client limit: with the colour-limit option on, a mosaic uses at most this many of the 94 colours
+MAX_COLOURS = 50  # strict client limit: NO mosaic ever uses more than this many of the 94 colours (a maximum, not a target)
+# Colour-count modes. "stop": the greedy palette search stops when the next colour would cut the total error by less than this share.
+# "merge": after conversion, a brick colour is dropped when losing it raises the mean blended ΔE by less than this.
+COLOUR_MODES = {"min": dict(stop=0.010, merge=0.05), "balanced": dict(stop=0.004, merge=0.02), "max": dict(stop=0.0, merge=0.0)}
+FLAT_MERGE = 6.0       # flat graphics: colour clusters closer than this (CIEDE2000) are the same colour (JPEG noise, anti-aliasing)
+FLAT_DISTINCT = 8.0    # flat graphics: clusters further apart than this should end up as different bricks when the palette allows
+SKIN_RANGE = dict(cr=(133, 173), cb=(77, 127))  # classic YCrCb skin window, used together with the face's own skin colour
 
 def load_sizes(path=os.path.join(BASE, "sizes.csv")):
     """Load the client's standard frame layouts, measured in 16x16-stud plate units."""
@@ -82,6 +89,18 @@ def srgb_to_lab(rgb):
     xyz = (c @ m.T) / np.array([0.95047, 1.0, 1.08883])
     f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
     return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+def lab_to_srgb(lab):
+    """Inverse of srgb_to_lab, clipped to 0..255."""
+    lab = np.asarray(lab, float)
+    fy = (lab[..., 0] + 16) / 116
+    fx, fz = fy + lab[..., 1] / 500, fy - lab[..., 2] / 200
+    inv = lambda t: np.where(t ** 3 > 0.008856, t ** 3, (t - 16 / 116) / 7.787)
+    xyz = np.stack([inv(fx), inv(fy), inv(fz)], -1) * np.array([0.95047, 1.0, 1.08883])
+    m = np.array([[3.2406, -1.5372, -0.4986], [-0.9689, 1.8758, 0.0415], [0.0557, -0.2040, 1.0570]])
+    c = np.clip(xyz @ m.T, 0, 1)
+    c = np.where(c > 0.0031308, 1.055 * c ** (1 / 2.4) - 0.055, 12.92 * c)
+    return np.clip(c * 255, 0, 255)
 
 def ciede2000(p, q) -> np.ndarray:
     """Strict colour difference (CIEDE2000). p: (N,1,3) Lab, q: (1,M,3) Lab -> (N,M)."""
@@ -135,6 +154,18 @@ def detect_face(img):
     x, y, fw, fh = max(r, key=lambda b: b[2] * b[3])
     return x / sc, y / sc, fw / sc, fh / sc
 
+def detect_faces(img):
+    """Every frontal face as a list of (x, y, w, h) in pixels, largest first; [] when none or no detector."""
+    if _FACE is None:
+        return []
+    g = np.asarray(img.convert("L"))
+    sc = min(1.0, 800 / max(g.shape))
+    if sc < 1:
+        g = cv2.resize(g, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
+    ms = max(30, g.shape[1] // 20)
+    r = _FACE.detectMultiScale(g, 1.1, 5, minSize=(ms, ms))
+    return [tuple(v / sc for v in b) for b in sorted(r, key=lambda b: -b[2] * b[3])]
+
 def face_mask(w, h, crop_size, face):
     """1 inside the face (plus a little hair and chin), fading to 0 outside, one value per brick cell."""
     if face is None:
@@ -150,11 +181,13 @@ def strength_map(m, base):
     """Dithering strength per cell: full on the background, much lower on and around the face."""
     return base * (1 - (1 - FACE_KEEP) * m)
 
-def pick_palette(lab, m, k=MAX_COLOURS):
-    """Choose the k palette colours that serve this photo best. Returns a True/False mask over the 94 colours.
+def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
+    """Choose at most k palette colours that serve this photo best. Returns a True/False mask over the 94 colours.
     Greedy pick (add the colour that cuts the total error most), then swaps to polish. The face counts 4x, so skin tones win.
-    Squared-ish error (d ** 1.5) so a few badly matched cells weigh more than many slightly off ones."""
+    Squared-ish error (d ** 1.5) so a few badly matched cells weigh more than many slightly off ones.
+    stop: the search ends early once the next colour would cut the remaining error by less than this share (0 = always take k)."""
     n = len(PALETTE)
+    k = min(k, MAX_COLOURS)  # the 50-colour cap is absolute
     if k >= n:
         return np.ones(n, bool)
     pts = lab.reshape(-1, 3)
@@ -172,7 +205,12 @@ def pick_palette(lab, m, k=MAX_COLOURS):
         cost = (wu[:, None] * np.minimum(cur[:, None], F)).sum(0)
         cost[sel] = np.inf
         c = int(cost.argmin())
+        if sel and stop > 0:
+            now = (wu * cur).sum()
+            if now - cost[c] < stop * now:  # the next colour would barely help: stop here, fewer colours win
+                break
         sel.append(c); cur = np.minimum(cur, F[:, c])
+    k = len(sel)
     rows = np.arange(U)
     for _ in range(2):  # polish: swap a chosen colour for an unused one whenever that lowers the total error
         moved = False
@@ -259,9 +297,251 @@ def face_metrics(orig_lab, brick_lab, m):
     c = lambda a, b: round(float(np.nan_to_num(np.corrcoef(a[sel], b[sel])[0, 1])), 3)
     return c(Lo, Lb), c(Lo - blurL(Lo), Lb - blurL(Lb))
 
-def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None):
-    """Return the brick matrix (single source of truth), target colours, errors and face measures."""
+
+def kmeans_lab(pts, K, iters=25):
+    """K-means in Lab (OpenCV when present, plain NumPy otherwise). pts: (N,3) float -> labels (N,), centres (K,3)."""
+    pts = np.asarray(pts, np.float32)
+    K = max(1, min(K, len(pts)))
+    if cv2 is not None and hasattr(cv2, "kmeans"):
+        crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, iters, 0.5)
+        _, lbl, cen = cv2.kmeans(pts, K, None, crit, 2, cv2.KMEANS_PP_CENTERS)
+        return lbl.ravel(), cen.astype(float)
+    rng = np.random.default_rng(0)  # k-means++ seeding, then Lloyd iterations
+    cen = [pts[rng.integers(len(pts))]]
+    for _ in range(1, K):
+        d = np.min(((pts[:, None, :] - np.array(cen)[None, :, :]) ** 2).sum(2), 1)
+        cen.append(pts[rng.choice(len(pts), p=d / d.sum())] if d.sum() > 0 else pts[rng.integers(len(pts))])
+    cen = np.array(cen, float)
+    for _ in range(iters):
+        lbl = ((pts[:, None, :] - cen[None, :, :]) ** 2).sum(2).argmin(1)
+        new = np.array([pts[lbl == i].mean(0) if (lbl == i).any() else cen[i] for i in range(K)])
+        if np.abs(new - cen).max() < 0.05:
+            cen = new; break
+        cen = new
+    lbl = ((pts[:, None, :] - cen[None, :, :]) ** 2).sum(2).argmin(1)
+    return lbl, cen
+
+def nearest_centre(lab, centres):
+    """Index of the closest centre (plain Lab distance) for every row of lab, in chunks."""
+    out = np.empty(len(lab), int)
+    for i in range(0, len(lab), 65536):
+        out[i:i + 65536] = ((lab[i:i + 65536, None, :] - centres[None, :, :]) ** 2).sum(2).argmin(1)
+    return out
+
+def merge_centres(cen, within):
+    """Union-find: centres closer than `within` (CIEDE2000) collapse into one. Returns the group of each centre."""
+    K = len(cen)
+    D = ciede2000(cen[:, None, :], cen[None, :, :])
+    parent = list(range(K))
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    for i in range(K):
+        for j in range(i + 1, K):
+            if D[i, j] < within:
+                parent[find(i)] = find(j)
+    roots = [find(i) for i in range(K)]
+    _, inv = np.unique(roots, return_inverse=True)
+    return inv
+
+def analyse_image(crop):
+    """Is this a flat graphic (flag, logo, illustration) or a photograph? Looks at a small copy of the framed photo.
+    flat_frac: share of pixels that sit right on one of a few colour centres. soft_edge: share of changing pixels that change
+    gently (gradients, shading) rather than sharply (boundaries). Flat graphics: high flat_frac, low soft_edge, few big colours."""
+    small = crop.copy(); small.thumbnail((256, 256), Image.Resampling.BOX)
+    rgb = np.asarray(small, float)
+    lab = srgb_to_lab(rgb.reshape(-1, 3))
+    lbl, cen = kmeans_lab(lab, 16)
+    grp = merge_centres(cen, FLAT_MERGE)
+    cen2 = np.array([lab[grp[lbl] == g].mean(0) for g in range(grp.max() + 1)])
+    near = nearest_centre(lab, cen2)
+    dmin = np.sqrt(((lab - cen2[near]) ** 2).sum(1))
+    area = np.bincount(near, minlength=len(cen2)) / len(lab)
+    L = lab[:, 0].reshape(rgb.shape[:2])
+    g = np.maximum(np.abs(np.diff(L, axis=1))[:-1, :], np.abs(np.diff(L, axis=0))[:, :-1])
+    moving = g > 1.0
+    soft = float(((g > 1.0) & (g < 8)).sum() / max(1, moving.sum()))
+    flat_frac = float((dmin <= 4.0).mean())
+    major = int((area >= 0.01).sum())
+    flat = flat_frac >= 0.93 or (flat_frac >= 0.85 and soft <= 0.55 and major <= 12)  # thin lines on a flat flag soften the edge count
+    return dict(profile="flat" if flat else "photo", flat_frac=round(flat_frac, 3), soft_edge=round(soft, 3),
+                major_colours=major, clusters=int(len(cen2)))
+
+def flat_cells(crop, w, h):
+    """Flat-graphic profile. Group the pixels of the framed image into a few colour regions, then give every brick cell the
+    colour of the region that covers MOST of it (majority vote). Anti-aliased edges, JPEG ringing and tiny tonal wobbles never
+    become brick colours, and boundaries between regions stay sharp. Returns cell labels (h,w), region Lab centres (K,3), region areas."""
+    s = max(1, min(8, crop.width // w, crop.height // h))  # a few pixels per cell are enough for a majority vote
+    work = crop.resize((w * s, h * s), Image.Resampling.BOX if s > 1 or crop.width >= w else Image.Resampling.LANCZOS)
+    lab = srgb_to_lab(np.asarray(work, float).reshape(-1, 3))
+    rng = np.random.default_rng(0)
+    sample = lab if len(lab) <= 60000 else lab[rng.choice(len(lab), 60000, replace=False)]
+    _, cen = kmeans_lab(sample, 16)
+    grp = merge_centres(cen, FLAT_MERGE)
+    cen = np.array([cen[grp == g].mean(0) for g in range(grp.max() + 1)])
+    near = nearest_centre(lab, cen)
+    cen = np.array([lab[near == i].mean(0) if (near == i).any() else cen[i] for i in range(len(cen))])
+    near = nearest_centre(lab, cen).reshape(h * s, w * s)
+    area = np.bincount(near.ravel(), minlength=len(cen)) / near.size
+    interior = np.ones(near.shape, bool)  # a pixel is "interior" when its 4 neighbours share its region
+    interior[1:, :] &= near[1:, :] == near[:-1, :]; interior[:-1, :] &= near[:-1, :] == near[1:, :]
+    interior[:, 1:] &= near[:, 1:] == near[:, :-1]; interior[:, :-1] &= near[:, :-1] == near[:, 1:]
+    coherence = np.array([interior[near == i].mean() if (near == i).any() else 0.0 for i in range(len(cen))])
+    keep = (area >= 0.02) | ((coherence >= 0.25) & (area >= 0.0005))  # real regions; edge-only "colours" are artifacts
+    if not keep.any():
+        keep[area.argmax()] = True
+    kept = np.flatnonzero(keep)
+    if len(kept) < len(cen):  # artifact pixels join the closest real region
+        near = kept[nearest_centre(lab, cen[kept])].reshape(h * s, w * s)
+    _, near = np.unique(near, return_inverse=True); near = near.reshape(h * s, w * s)
+    cen = np.array([lab[near.ravel() == i].mean(0) for i in range(near.max() + 1)])
+    K = len(cen)
+    onehot = (near.reshape(h, s, w, s)[..., None] == np.arange(K)).sum((1, 3))  # (h, w, K) pixel votes per cell
+    labels = onehot.argmax(2)
+    area = np.bincount(labels.ravel(), minlength=K) / labels.size
+    return labels, cen, area
+
+def flat_bricks(cen, area, skin_ok=None):
+    """One brick per flat-graphic region: the closest palette colour (CIEDE2000). Two clearly different regions are kept apart
+    when a second brick is nearly as close; two near-identical regions are allowed to share a brick (fewer colours)."""
+    D = ciede2000(cen[:, None, :], PAL_LAB[None, :, :])
+    between = ciede2000(cen[:, None, :], cen[None, :, :])
+    brick, owner = np.zeros(len(cen), int), {}
+    for i in np.argsort(-area):
+        order = np.argsort(D[i])
+        best = int(order[0])
+        if best in owner and between[i, owner[best]] > FLAT_DISTINCT:
+            for alt in order[1:]:
+                if int(alt) not in owner and D[i, alt] <= D[i, best] + 6.0:
+                    best = int(alt); break
+        brick[i] = best; owner.setdefault(best, i)
+    return brick
+
+def dilate1(mask):
+    """3x3 dilation of a boolean (h,w) mask."""
+    p = np.pad(mask, 1)
+    out = np.zeros_like(mask)
+    for dy in range(3):
+        for dx in range(3):
+            out |= p[dy:dy + mask.shape[0], dx:dx + mask.shape[1]]
+    return out
+
+def merge_pass(idx, lab, m, threshold, floor=1):
+    """Final palette reduction. Repeatedly drop the used brick colour whose loss hurts least: its cells move to the closest
+    remaining used colour, and the cost is the rise in mean blended ΔE (what the eye sees), face cells counting 4x.
+    Stops when the cheapest drop costs more than `threshold`. Returns the new matrix and how many colours were dropped."""
+    if threshold <= 0:
+        return idx, 0
+    h, w = idx.shape
+    wgt = 1 + 3 * m
+    target = blur3(lab)
+    dropped = 0
+    while True:
+        used = np.unique(idx)
+        if len(used) <= floor:
+            break
+        cur = blur3(PAL_LAB[idx])
+        best_c, best_cost, best_new = None, np.inf, None
+        for c in used:
+            cells = idx == c
+            others = used[used != c]
+            d = ciede2000(lab[cells][:, None, :], PAL_LAB[others][None, :, :])
+            new = idx.copy(); new[cells] = others[d.argmin(1)]
+            aff = dilate1(cells)
+            old_err = ciede2000(target[aff], cur[aff])
+            new_err = ciede2000(target[aff], blur3(PAL_LAB[new])[aff])
+            cost = float(((new_err - old_err) * wgt[aff]).sum() / wgt.sum())
+            if cost < best_cost:
+                best_c, best_cost, best_new = c, cost, new
+        if best_cost > threshold:
+            break
+        idx = best_new; dropped += 1
+    return idx, dropped
+
+def ycrcb_skin(rgb):
+    """Classic YCrCb skin window, per cell."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cr, cb = (r - y) * 0.713 + 128, (b - y) * 0.564 + 128
+    return (cr >= SKIN_RANGE["cr"][0]) & (cr <= SKIN_RANGE["cr"][1]) & (cb >= SKIN_RANGE["cb"][0]) & (cb <= SKIN_RANGE["cb"][1])
+
+def components(mask):
+    """Connected components (4-neighbour) of a boolean (h,w) mask -> label map (0 = background), count."""
+    if cv2 is not None and hasattr(cv2, "connectedComponents"):
+        n, lab = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
+        return lab, n - 1
+    h, w = mask.shape
+    lab, n = np.zeros((h, w), int), 0
+    for y0 in range(h):
+        for x0 in range(w):
+            if mask[y0, x0] and lab[y0, x0] == 0:
+                n += 1; stack = [(y0, x0)]; lab[y0, x0] = n
+                while stack:
+                    y, x = stack.pop()
+                    for yy, xx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                        if 0 <= yy < h and 0 <= xx < w and mask[yy, xx] and lab[yy, xx] == 0:
+                            lab[yy, xx] = n; stack.append((yy, xx))
+    return lab, n
+
+def skin_mask(w, h, crop_size, faces, rgb, lab):
+    """Soft 0..1 mask of skin cells. Seeds: warm cells inside each detected face. Each face gives a reference skin colour;
+    cells anywhere that look like skin (YCrCb window) AND are close to a reference colour are candidates. A candidate blob that
+    touches a face is kept where it lies around / below that face (ears, neck, chest), so a skin-coloured hat or wall above the
+    face stays out; any blob whose colour matches a reference very closely is kept too (hands, other people's skin)."""
+    if not faces:
+        return np.zeros((h, w))
+    warm = (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 20)
+    seeds, refs, zone = np.zeros((h, w), bool), [], np.zeros((h, w), bool)
+    sx, sy = w / crop_size[0], h / crop_size[1]
+    yy, xx = np.mgrid[0:h, 0:w]
+    for f in faces:
+        fm = face_mask(w, h, crop_size, f) > 0.6
+        cells = fm & warm
+        if cells.sum() < 4:
+            continue
+        seeds |= cells
+        refs.append(np.median(lab[cells], axis=0))
+        cx, cy = (f[0] + f[2] / 2) * sx, (f[1] + f[3] / 2) * sy
+        rx, ry = max(f[2] * sx * 0.7, 1), max(f[3] * sy * 0.8, 1)
+        dx, dy = np.abs(xx + .5 - cx) / rx, (yy + .5 - cy) / ry
+        zone |= (dy >= -1.0) & (dy <= 3.0) & (dx <= np.where(dy < 0.8, 1.6, 2.4))  # face and ears, then neck and chest; not a hat or wall above
+    if not refs:
+        return np.zeros((h, w))
+    refs = np.array(refs)
+    dref = ciede2000(lab.reshape(-1, 1, 3), refs[None, :, :]).min(1).reshape(h, w)
+    cand = ycrcb_skin(rgb) & warm & (dref <= 12)
+    lab_cc, n = components(cand | seeds)
+    keep = np.zeros((h, w), bool)
+    for i in range(1, n + 1):
+        blob = lab_cc == i
+        if (blob & seeds).any():
+            keep |= blob & zone
+        elif blob.sum() >= 0.003 * w * h and np.median(dref[blob]) <= 7:
+            keep |= blob
+    soft = blur3(np.stack([keep.astype(float)] * 3, -1))[..., 0]
+    return np.clip(np.maximum(keep, soft), 0, 1)
+
+def adjust_skin(lab, mask, adj):
+    """Skin tone adjustment on skin cells only (Lab). br: lightness, warm: toward yellow-orange (+) or cooler (-), sat: colour strength.
+    Sliders run -50..50; 0 everywhere leaves the photo untouched."""
+    if adj is None or not adj.get("on") or not mask.any():
+        return lab
+    L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
+    L2 = L + adj["br"] * 0.4
+    a2, b2 = a + adj["warm"] * 0.06, b + adj["warm"] * 0.24
+    scale = 1 + adj["sat"] / 100
+    a2, b2 = a2 * scale, b2 * scale
+    out = np.stack([np.clip(L2, 0, 100), a2, b2], -1)
+    mk = mask[..., None]
+    return lab * (1 - mk) + out * mk
+
+def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None, profile="auto", colours="min", skin_adj=None):
+    """Return the brick matrix (single source of truth), target colours, errors, face measures and a report dict.
+    profile: "auto" (detect), "flat" (flags, logos, illustrations) or "photo". colours: "min", "balanced" or "max" (all capped at 50).
+    limit (old API): None = "max", anything else = colours mode as given."""
     grade = grade or dict(mode="off", br=0, ct=0, sat=0, sh=0)
+    mode = COLOUR_MODES.get(colours, COLOUR_MODES["min"])
     img = ImageOps.exif_transpose(img).convert("RGB")  # match how the browser shows phone photos
     img.thumbnail((2500, 2500), Image.Resampling.LANCZOS)  # far more detail than 240 bricks can use; crop fractions stay valid
     if box:  # (x, y, width, height) as fractions of the photo, set by the person in the frame editor
@@ -273,21 +553,56 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
     resampling = Image.Resampling.LANCZOS if upscaled else Image.Resampling.BOX
     rgb0 = np.asarray(crop.resize((w, h), resampling), float)  # interpolate small photos; average larger photos per cell
     orig_lab = srgb_to_lab(rgb0.reshape(-1, 3)).reshape(h, w, 3)
-    face = detect_face(crop)
+    analysis = analyse_image(crop)
+    faces = detect_faces(crop)
+    if profile == "auto":  # a real face on a plain background is still a photograph
+        profile = "photo" if (faces and analysis["flat_frac"] < 0.985) else analysis["profile"]
+    face = faces[0] if faces else None
     m = face_mask(w, h, crop.size, face)
-    rgb = grade_small(rgb0, grade)  # the target the bricks aim for
-    lab = srgb_to_lab(rgb.reshape(-1, 3)).reshape(h, w, 3)
-    if boost > 0 and face is not None:  # extra local contrast on the face only
-        L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
-    skin_cells = (m > 0.5) & (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 25) if skin else None
-    allowed = pick_palette(lab, m, limit) if limit else None  # None = all 94 colours, exactly as before
-    idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed)
+    report = dict(profile=profile, detected=analysis, faces=len(faces), dither=dither, grading=grade["mode"], skin_cells=0.0, dropped=0, allowed=None)
+    if profile == "flat":
+        # ---- flat graphics: regions -> majority vote per cell -> one brick per region. No dithering, no auto grading, no sharpening.
+        labels, cen, area = flat_cells(crop, w, h)
+        cen_rgb = lab_to_srgb(cen)
+        if grade["mode"] == "custom":  # brightness / contrast / colour still work on the region colours (sharpening is pointless here)
+            cen_rgb = grade_small(cen_rgb.reshape(1, -1, 3), dict(grade, sh=0)).reshape(-1, 3)
+            cen = srgb_to_lab(cen_rgb)
+        report["grading"] = "custom" if grade["mode"] == "custom" else "off"
+        report["dither"] = "off"
+        report["regions"] = int(len(cen))
+        brick_of = flat_bricks(cen, area)
+        allowed = np.zeros(len(PALETTE), bool); allowed[brick_of] = True
+        if allowed.sum() > MAX_COLOURS:  # cannot happen with 16 regions, kept for the strict cap
+            allowed = pick_palette(cen, np.zeros(len(cen)), MAX_COLOURS)
+            brick_of = np.array([int(np.flatnonzero(allowed)[ciede2000(c[None, None, :], PAL_LAB[allowed][None, :, :])[0].argmin()]) for c in cen])
+        idx = brick_of[labels]
+        rgb = cen_rgb[labels]
+        lab = cen[labels]
+        skin_cells = None
+        report["allowed"] = int(allowed.sum())
+    else:
+        # ---- photographs: grade, adjust skin, boost the face, choose the smallest useful palette, dither within it, then merge.
+        rgb = grade_small(rgb0, grade)  # the target the bricks aim for
+        lab = srgb_to_lab(rgb.reshape(-1, 3)).reshape(h, w, 3)
+        smask = skin_mask(w, h, crop.size, faces, rgb, lab) if (skin or (skin_adj and skin_adj.get("on"))) else np.zeros((h, w))
+        if skin_adj and skin_adj.get("on"):
+            lab = adjust_skin(lab, smask, skin_adj)  # skin cells only; clothing and background are untouched
+            rgb = np.where((smask > 0)[..., None], lab_to_srgb(lab.reshape(-1, 3)).reshape(h, w, 3), rgb)
+        report["skin_cells"] = round(float((smask > 0.5).mean() * 100), 1)
+        if boost > 0 and face is not None:  # extra local contrast on the face only
+            L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
+        skin_cells = ((smask > 0.5) | ((m > 0.5) & (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 25))) if skin else None
+        allowed = pick_palette(lab, m, MAX_COLOURS, mode["stop"])  # never more than 50; usually far fewer
+        report["allowed"] = int(allowed.sum())
+        idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed)
+        idx, report["dropped"] = merge_pass(idx, lab, m, mode["merge"])
+    assert len(np.unique(idx)) <= MAX_COLOURS  # the strict cap, checked on the final matrix
     brick = PAL_LAB[idx]
     raw = ciede2000(lab.reshape(-1, 3), brick.reshape(-1, 3))  # strict, cell by cell
     blend = ciede2000(blur3(lab).reshape(-1, 3), blur3(brick).reshape(-1, 3))  # how it looks from a distance
     vs_orig = ciede2000(blur3(orig_lab).reshape(-1, 3), blur3(brick).reshape(-1, 3))  # against YOUR untouched photo
     structure, detail = face_metrics(orig_lab, brick, m)
-    return idx, rgb.reshape(-1, 3), raw, blend, crop, face is not None, vs_orig, structure, detail
+    return idx, rgb.reshape(-1, 3), raw, blend, crop, face is not None, vs_orig, structure, detail, report
 
 def stud_shade(cell):
     """Light/shadow pattern for one brick: a round stud on a flat tile, tiles touching with only a hairline between."""
@@ -333,12 +648,20 @@ def do_convert():
     mode = request.form.get("gmode", "off")
     grade = dict(mode=mode if mode in ("off", "auto", "custom") else "off",
                  br=num("gbr", -50, 50), ct=num("gct", -50, 50), sat=num("gsat", -50, 50), sh=num("gsh", 0, 100))
-    m, photo_rgb, raw, de, crop, face, vs_orig, structure, detail = convert(
+    colours = request.form.get("colours") or ("min" if request.form.get("limit", "1") == "1" else "max")  # old "limit" form field still works
+    if colours not in COLOUR_MODES:
+        colours = "min"
+    profile = request.form.get("profile", "auto")
+    if profile not in ("auto", "flat", "photo"):
+        profile = "auto"
+    skin_adj = dict(on=request.form.get("sk_on", "0") == "1", br=num("sk_br", -50, 50), warm=num("sk_warm", -50, 50), sat=num("sk_sat", -50, 50))
+    m, photo_rgb, raw, de, crop, face, vs_orig, structure, detail, report = convert(
         img, w, h, box, request.form.get("dither", "normal"), grade,
         1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "1") == "1",
-        MAX_COLOURS if request.form.get("limit", "0") == "1" else None)
+        None, profile, colours, skin_adj)
     counts = np.bincount(m.ravel(), minlength=len(PALETTE))
     assert counts.sum() == w * h  # quantities must equal total cells
+    assert int((counts > 0).sum()) <= MAX_COLOURS  # strict 50-colour cap on the final mosaic (counts, CSV and stats all come from this matrix)
     rows = [dict(code=PALETTE[i]["code"], name=PALETTE[i]["name"], hex=PALETTE[i]["hex"], count=int(c))
             for i, c in enumerate(counts) if c]
     rows.sort(key=lambda r: -int(r["count"]))
@@ -351,7 +674,7 @@ def do_convert():
                  vs_orig=round(float(vs_orig.mean()), 2), face_structure=structure, face_detail=detail)
     return jsonify(preview="data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
                    cells=cells, stats=stats, w=w, h=h, face=face, upscaled=crop.width < w or crop.height < h, version=APP_VERSION,
-                   used=len(rows), limit=MAX_COLOURS if request.form.get("limit", "0") == "1" else None,
+                   used=len(rows), limit=MAX_COLOURS, colours_mode=colours, report=report,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",
                    frame_cm=f"{w * STUD_CM + 0.2:.1f} x {h * STUD_CM + 0.2:.1f}",
