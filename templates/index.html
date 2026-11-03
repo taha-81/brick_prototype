@@ -82,7 +82,7 @@ select{font:inherit;font-size:15px;color:var(--ink);background:var(--soft);borde
 .two{display:flex;gap:14px;flex-wrap:wrap}
 .size-picker{margin-bottom:18px}
 .size-picker>.field{margin-bottom:10px}
-.orientation-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;margin:0 0 12px;background:var(--soft);border-radius:10px}
+.orientation-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:4px;margin:0 0 12px;background:var(--soft);border-radius:10px}
 .orientation-tab{position:relative;display:grid;justify-items:center;gap:2px;padding:8px 4px 10px;background:transparent;color:var(--mute);border-radius:7px;font-size:13px;font-weight:400}
 .orientation-tab:hover:not(:disabled){filter:none;background:color-mix(in srgb,var(--panel) 70%,transparent)}
 .orientation-tab[aria-pressed=true]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
@@ -90,6 +90,7 @@ select{font:inherit;font-size:15px;color:var(--ink);background:var(--soft);borde
 .orientation-icon{display:block;width:17px;height:17px;border:2px solid currentColor;border-radius:3px}
 .orientation-tab[data-orientation-tab="Landscape"] .orientation-icon{width:22px;height:14px}
 .orientation-tab[data-orientation-tab="Portrait"] .orientation-icon{width:13px;height:21px}
+.orientation-tab[data-orientation-tab="Custom"] .orientation-icon{width:auto;height:auto;border:0;font-size:20px;line-height:20px}
 .size-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
 .size-option{display:flex;min-width:0;min-height:124px;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:9px 5px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:9px;font-weight:400;text-align:center;transition:border-color .15s,background .15s,box-shadow .15s}
 .size-option:hover:not(:disabled){filter:none;border-color:var(--blue)}
@@ -98,6 +99,12 @@ select{font:inherit;font-size:15px;color:var(--ink);background:var(--soft);borde
 .plate-grid span{display:block;border-radius:1px;background:#62666b}
 .size-dimensions{font-size:14px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap}
 .size-plate-count{font-size:12px;color:var(--mute);line-height:1.2}
+.size-frame-opening{font-size:11px;color:var(--mute);line-height:1.2}
+.custom-size-fields{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:end;padding:14px;background:var(--soft);border:1px solid var(--line);border-radius:9px}
+.custom-size-fields .field{margin:0}
+.custom-size-fields input{box-sizing:border-box;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit}
+.custom-size-multiply{padding-bottom:8px;color:var(--mute)}
+.custom-size-summary{grid-column:1/-1;margin:0;font-size:13px;color:var(--mute)}
 @media(max-width:520px){.size-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.size-option{min-height:116px}}
 .toggles{display:grid;gap:8px;margin:4px 0 6px}
 .toggles label{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:start;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;font-weight:700;font-size:15px}
@@ -208,27 +215,34 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   <div class="step"><span class="num">2</span><h3>Pick a size and look</h3></div>
   <div class="size-picker">
     <label class="field"><span>Mosaic size</span>
-      <select id="size" hidden>{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key=='2x2' %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
-      <span class="hint">Each baseplate is 24 x 24 studs (19.2 cm). More plates means more bricks and more detail.</span>
+      <select id="size" hidden>{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key==default_size %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
+      <span class="hint">Each plate unit is 16 x 16 studs (12.8 cm). Frame openings add 0.2 cm to each overall dimension.</span>
     </label>
     <div class="orientation-tabs" role="group" aria-label="Mosaic orientation">
-      {% for orientation in ['Square','Landscape','Portrait'] %}
+      {% for orientation in ['Square','Landscape','Portrait','Custom'] %}
       <button type="button" class="orientation-tab" data-orientation-tab="{{orientation}}" aria-pressed="{{'true' if orientation=='Square' else 'false'}}">
-        <span class="orientation-icon" aria-hidden="true"></span>{{orientation}}
+        <span class="orientation-icon" aria-hidden="true">{% if orientation=='Custom' %}↗{% endif %}</span>{{orientation}}
       </button>
       {% endfor %}
     </div>
     {% for orientation in ['Square','Landscape','Portrait'] %}
     <div class="size-grid" data-orientation-panel="{{orientation}}"{% if orientation!='Square' %} hidden{% endif %}>
       {% for group in groups %}{% if group[0]==orientation %}{% for r in group[1] %}
-      <button type="button" class="size-option" data-size-option="{{r.key}}" aria-pressed="{{'true' if r.key=='2x2' else 'false'}}">
-        <span class="plate-grid" style="--plate-cols:{{r.key.split('x')[0]}}" aria-hidden="true">{% for plate in range((r.key.split('x')[0]|int) * (r.key.split('x')[1]|int)) %}<span></span>{% endfor %}</span>
-        <span class="size-dimensions">{{r.label.split(',')[2]|replace('x',' × ')}}</span>
-        <span class="size-plate-count">{{r.key}} plates</span>
+      <button type="button" class="size-option" data-size-option="{{r.key}}" aria-pressed="{{'true' if r.key==default_size else 'false'}}">
+        <span class="plate-grid" style="--plate-cols:{{r.plates_w}}" aria-hidden="true">{% for plate in r.plate_cells %}<span></span>{% endfor %}</span>
+        <span class="size-dimensions">{{r.cm_w}} × {{r.cm_h}} cm</span>
+        <span class="size-plate-count">{{r.key}} plate units</span>
+        <span class="size-frame-opening">Frame: {{r.frame_w}} × {{r.frame_h}} cm</span>
       </button>
       {% endfor %}{% endif %}{% endfor %}
     </div>
     {% endfor %}
+    <div class="custom-size-fields" data-orientation-panel="Custom" hidden>
+      <label class="field"><span>Width (plate units)</span><input id="customWidth" type="number" min="1" max="{{max_plate_units}}" step="1" value="3"></label>
+      <span class="custom-size-multiply" aria-hidden="true">×</span>
+      <label class="field"><span>Height (plate units)</span><input id="customHeight" type="number" min="1" max="{{max_plate_units}}" step="1" value="3"></label>
+      <p class="custom-size-summary" id="customSizeSummary">Enter the number of 16 × 16 stud plate units in each direction. Custom sizes are limited to {{max_plate_units}} units per side.</p>
+    </div>
   </div>
   <div class="two">
     <label class="field"><span>Colour mixing</span>
@@ -255,10 +269,10 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   <details class="tips">
     <summary>Recommended settings</summary>
     <div class="tipgrid">
-      <div><h5>Small mosaics (1x1 to 2x2 plates)</h5>
+      <div><h5>Small mosaics (3x3 to 5x5 plate units)</h5>
         <p>Dithering Soft, Grading Auto, Skin protection on, Face boost off. Zoom in so the face fills most of the frame.</p>
         <button type="button" class="alt" id="preSmall">Use small settings</button></div>
-      <div><h5>Large mosaics (3x3 plates and up)</h5>
+      <div><h5>Large mosaics (6 or more plate units per side)</h5>
         <p>Dithering Normal, Grading Auto, Skin protection on, Face boost off. Zoom out a little to include hair and shoulders.</p>
         <button type="button" class="alt" id="preLarge">Use large settings</button></div>
     </div>
@@ -298,7 +312,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
 <div class="row bricks-h"><h4 style="margin:0">Bricks needed</h4><button class="alt" id="csv">Download counts (CSV)</button></div>
 <div class="tablebox"><table id="tbl"><thead><tr><th>Colour</th><th>Code</th><th>Name</th><th>Bricks</th></tr></thead><tbody></tbody></table></div>
 </div></div>
-<footer>Colour matching uses the supplier's 94-colour palette. Every size is made of whole 24 x 24 stud baseplates.</footer>
+<footer>Colour matching uses the supplier's 94-colour palette. Standard sizes follow the client's 16 x 16 stud plate units; custom sizes are available up to {{max_plate_units}} units per side.</footer>
 <script id="boot" type="application/json">{{ boot|tojson }}</script><script>
 const $=id=>document.getElementById(id),BOOT=JSON.parse(document.getElementById('boot').textContent),SZ=BOOT.sizes;let D=null,E=null,PV=null;
 /* ---------- photo frame editor: zoom / move the photo, then convert only what is inside the frame ---------- */
@@ -355,7 +369,7 @@ function heat(){const cv=$('cv');cv.width=D.w;cv.height=D.h;const g=cv.getContex
 function setMode(m){$('imgR').hidden=m==2;$('cv').hidden=m==1;$('m1').className=m==1?'on':'alt';$('m2').className=m==2?'on':'alt';
   $('rt').textContent=m==1?'Mosaic':'Error map (green = exact, yellow = ok, red = difference of 10+)'}
 $('csv').onclick=()=>{if(!D)return;const rows=[['code','name','hex','bricks'],...D.colours.map(c=>[c.code,'"'+c.name+'"',c.hex,c.count]),['TOTAL','','',D.total],
-  ['SIZE','"'+D.studs+' studs, '+D.cm+' cm, '+D.plates+' baseplates"','','']];
+  ['SIZE','"'+D.studs+' studs, '+D.cm+' cm, '+D.plates+' plate units"','',''],['FRAME OPENING','"'+D.frame_cm+' cm"','','']];
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='brick_counts.csv';a.click()};
 const statLine=s=>`Delta E vs your photo ${s.vs_orig} | face structure ${s.face_structure??'n/a'} | face detail ${s.face_detail??'n/a'}`;
 function setLeft(m){if(!D)return;if(m==2&&!PV)m=1;$('l1').className=m==1?'on':'alt';$('l2').className=m==2?'on':'alt';
@@ -367,6 +381,7 @@ $('m1').onclick=()=>setMode(1);$('m2').onclick=()=>setMode(2);
 $('go').onclick=async()=>{
   $('err').textContent='';const f=$('photo').files[0];
   if(!f||!E){$('err').textContent='Choose a photo first.';return}
+  if(!$('size').value){$('err').textContent='Enter a valid mosaic size.';return}
   if(!E.blob){$('err').textContent='The photo is still being prepared. Try again in a moment.';return}
   const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('limit',$('lim').checked?'1':'0');
   const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh);$('go').disabled=true;$('go').textContent='Converting...';
@@ -376,7 +391,7 @@ $('go').onclick=async()=>{
     if(d.version!==BOOT.version)$('err').textContent='Page and server are different versions. Press Ctrl+F5.';
     d.original=origURL;PV=(D&&D.w==d.w&&D.h==d.h)?D:null;D=d;$('res').hidden=false;$('l2').disabled=!PV;$('imgR').src=d.preview;setLeft(1);heat();setMode(1);
     $('insp').textContent='Tap any brick to compare the photo colour with the brick colour.';
-    $('info').textContent=`${d.studs} studs | ${d.cm} cm | ${d.plates} baseplates | ${d.total} bricks total | ${d.used} colours used${d.limit?' (limit '+d.limit+')':''}${d.upscaled?' | Low-resolution photo smoothly enlarged; no new detail is recovered.':''}`;
+    $('info').textContent=`${d.studs} studs | ${d.cm} cm | frame opening ${d.frame_cm} | ${d.plates} plate units | ${d.total} bricks total | ${d.used} colours used${d.limit?' (limit '+d.limit+')':''}${d.upscaled?' | Low-resolution photo smoothly enlarged; no new detail is recovered.':''}`;
     const s=d.stats;$('stats').innerHTML=[['Mean &Delta;E (blended)',s.mean],['&Delta;E vs your photo',s.vs_orig],['Mean per brick',s.raw_mean],['Median',s.median],['90% of bricks &le;',s.p90],['Worst brick',s.max],['Bricks with &Delta;E &gt; 5',s.over5+'%'],['Face structure',s.face_structure??'n/a'],['Face detail',s.face_detail??'n/a']]
       .map(a=>`<div class="card"><b>${a[1]}</b><span>${a[0]}</span></div>`).join('');
     $('verdict').innerHTML='&Delta;E is the colour difference (CIEDE2000, against the Excel hex colours). "Per brick" compares each brick alone with its photo cell. "Blended" compares each brick with its 8 neighbours averaged, which is what your eye sees from a distance and is the fair number once dithering is on. Under 2 is almost invisible, 2 to 5 small, above 5 clearly different. "vs your photo" compares with your untouched photo, so grading raises it on purpose. "Face structure" and "Face detail" run from 0 to 1: higher means the face shapes, then fine details like eyes and lips, survived better.';
@@ -402,13 +417,34 @@ $('go').onclick=async()=>{
   document.getElementById('preLarge').onclick=()=>preset('normal','auto');
   const size=document.getElementById('size'),tabs=[...document.querySelectorAll('[data-orientation-tab]')];
   const panels=[...document.querySelectorAll('[data-orientation-panel]')],options=[...document.querySelectorAll('[data-size-option]')];
-  const showOrientation=orientation=>{tabs.forEach(tab=>tab.setAttribute('aria-pressed',String(tab.dataset.orientationTab===orientation)));
+  const customWidth=document.getElementById('customWidth'),customHeight=document.getElementById('customHeight');
+  const activateOrientation=orientation=>{tabs.forEach(tab=>tab.setAttribute('aria-pressed',String(tab.dataset.orientationTab===orientation)));
     panels.forEach(panel=>panel.hidden=panel.dataset.orientationPanel!==orientation)};
+  const selectSize=key=>{size.value=key;size.dispatchEvent(new Event('change',{bubbles:true}))};
+  const syncCustomSize=()=>{const w=Number(customWidth.value),h=Number(customHeight.value),max=Number(customWidth.max);
+    if(!Number.isInteger(w)||!Number.isInteger(h)||w<1||h<1||w>max||h>max){
+      document.getElementById('customSizeSummary').textContent=`Enter whole plate-unit counts from 1 to ${max}.`;
+      size.value='';options.forEach(option=>option.setAttribute('aria-pressed','false'));return}
+    const key=`custom:${w}x${h}`,studsW=w*16,studsH=h*16,cmW=(w*12.8).toFixed(1),cmH=(h*12.8).toFixed(1);
+    let option=[...size.options].find(item=>item.value===key);
+    if(!option){option=document.createElement('option');option.value=key;size.add(option)}
+    option.textContent=`${w}x${h} custom plate units, ${studsW}x${studsH} studs, ${cmW}x${cmH} cm`;
+    SZ[key]=[studsW,studsH];
+    document.getElementById('customSizeSummary').textContent=`${studsW} × ${studsH} studs · ${cmW} × ${cmH} cm · frame opening ${(w*12.8+0.2).toFixed(1)} × ${(h*12.8+0.2).toFixed(1)} cm`;
+    selectSize(key)};
   const syncSize=()=>{const selected=options.find(option=>option.dataset.sizeOption===size.value);
     options.forEach(option=>option.setAttribute('aria-pressed',String(option===selected)));
-    if(selected)showOrientation(selected.closest('[data-orientation-panel]').dataset.orientationPanel)};
+    if(size.value.startsWith('custom:'))activateOrientation('Custom');
+    else if(selected)activateOrientation(selected.closest('[data-orientation-panel]').dataset.orientationPanel)};
+  const showOrientation=orientation=>{activateOrientation(orientation);
+    if(orientation==='Custom'){syncCustomSize();return}
+    const selected=options.find(option=>option.dataset.sizeOption===size.value);
+    if(!selected||selected.closest('[data-orientation-panel]').dataset.orientationPanel!==orientation){
+      const first=options.find(option=>option.closest('[data-orientation-panel]').dataset.orientationPanel===orientation);
+      if(first)selectSize(first.dataset.sizeOption)}};
   tabs.forEach(tab=>tab.addEventListener('click',()=>showOrientation(tab.dataset.orientationTab)));
-  options.forEach(option=>option.addEventListener('click',()=>{size.value=option.dataset.sizeOption;size.dispatchEvent(new Event('change',{bubbles:true}))}));
+  options.forEach(option=>option.addEventListener('click',()=>selectSize(option.dataset.sizeOption)));
+  [customWidth,customHeight].forEach(input=>input.addEventListener('input',syncCustomSize));
   size.addEventListener('change',syncSize);
   syncSize();
 })();

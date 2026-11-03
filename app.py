@@ -1,5 +1,6 @@
 """Photo -> brick mosaic prototype (Day 1): upload, size, palette match, preview, counts."""
 import base64, csv, io, math, os
+import re
 from typing import Any
 import numpy as np
 from flask import Flask, jsonify, render_template, request
@@ -32,23 +33,41 @@ def too_big(_):
 DITHER = {"off": 0.0, "soft": 0.5, "normal": 0.8, "strong": 1.0}  # strength on the background
 FACE_KEEP = 0.25  # on the face, dithering is cut to this share, so eyes and lips stay crisp
 FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-Steinberg
-STUD_CM, PLATE_STUDS = 0.8, 24  # 8 mm brick, 24x24-stud baseplate (19.2 cm)
+STUD_CM, PLATE_STUDS = 0.8, 16  # client module: 16x16 studs (12.8 cm)
+MAX_PLATE_UNITS = 12
+DEFAULT_SIZE = "3x3"
 MAX_COLOURS = 55  # client limit: with the colour-limit option on, a mosaic uses at most this many of the 94 colours
 
 def load_sizes(path=os.path.join(BASE, "sizes.csv")):
-    """All sizes from the supplier's Excel sheet (kept in sizes.csv). Every side must be whole baseplates (multiples of 24 studs)."""
+    """Load the client's standard frame layouts, measured in 16x16-stud plate units."""
     sizes, groups = {}, {}
     with open(path, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
-            w, h = int(r["studs_w"]), int(r["studs_h"])
-            assert w % PLATE_STUDS == 0 and h % PLATE_STUDS == 0, f"size {w}x{h} is not whole baseplates"
-            key = f"{w // PLATE_STUDS}x{h // PLATE_STUDS}"  # baseplate layout, e.g. 2x3 = 2 plates wide, 3 tall
+            plates_w, plates_h = int(r["plates_w"]), int(r["plates_h"])
+            assert 1 <= plates_w <= MAX_PLATE_UNITS and 1 <= plates_h <= MAX_PLATE_UNITS
+            w, h = plates_w * PLATE_STUDS, plates_h * PLATE_STUDS
+            key = f"{plates_w}x{plates_h}"
             sizes[key] = (w, h)
             groups.setdefault(r["orientation"], []).append(
-                dict(key=key, label=f"{key} plates, {w}x{h} studs, {w * STUD_CM:.1f}x{h * STUD_CM:.1f} cm"))
+                dict(key=key, label=f"{key} plate units, {w}x{h} studs, {w * STUD_CM:.1f}x{h * STUD_CM:.1f} cm",
+                     plates_w=plates_w, plates_h=plates_h, plate_cells=[None] * (plates_w * plates_h),
+                     cm_w=f"{w * STUD_CM:.1f}", cm_h=f"{h * STUD_CM:.1f}",
+                     frame_w=f"{w * STUD_CM + 0.2:.1f}", frame_h=f"{h * STUD_CM + 0.2:.1f}"))
     return sizes, list(groups.items())
 
 SIZES, SIZE_GROUPS = load_sizes()
+
+def resolve_size(key):
+    """Resolve a listed layout or a custom layout, both expressed in plate units."""
+    if key in SIZES:
+        return SIZES[key]
+    match = re.fullmatch(r"custom:(\d{1,2})x(\d{1,2})", key or "")
+    if not match:
+        return None
+    plates_w, plates_h = map(int, match.groups())
+    if not (1 <= plates_w <= MAX_PLATE_UNITS and 1 <= plates_h <= MAX_PLATE_UNITS):
+        return None
+    return plates_w * PLATE_STUDS, plates_h * PLATE_STUDS
 
 def load_palette(path=os.path.join(BASE, "palette_94.csv")):
     with open(path, newline="") as f:
@@ -289,18 +308,21 @@ def render(matrix, cell=16):
 
 @app.route("/")
 def index():
-    return render_template("index.html", groups=SIZE_GROUPS, version=APP_VERSION, boot=dict(sizes=SIZES, version=APP_VERSION))
+    return render_template("index.html", groups=SIZE_GROUPS, default_size=DEFAULT_SIZE,
+                           max_plate_units=MAX_PLATE_UNITS, version=APP_VERSION,
+                           boot=dict(sizes=SIZES, version=APP_VERSION))
 
 @app.route("/convert", methods=["POST"])
 def do_convert():
-    f, key = request.files.get("photo"), request.form.get("size", "2x2")
-    if not f or key not in SIZES:
+    f, key = request.files.get("photo"), request.form.get("size", DEFAULT_SIZE)
+    dimensions = resolve_size(key)
+    if not f or dimensions is None:
         return jsonify(error="Upload a JPG/PNG photo and choose a size."), 400
     try:
         img = Image.open(f.stream)
     except Exception:
         return jsonify(error="That file is not a valid image."), 400
-    w, h = SIZES[key]
+    w, h = dimensions
     try:
         box = [float(request.form[k]) for k in ("cx", "cy", "cw", "ch")]
         ok = box[2] > 0.01 and box[3] > 0.01 and min(box[:2]) >= -0.001 and box[0] + box[2] <= 1.001 and box[1] + box[3] <= 1.001
@@ -332,6 +354,7 @@ def do_convert():
                    used=len(rows), limit=MAX_COLOURS if request.form.get("limit", "0") == "1" else None,
                    palette=[[p["code"], p["name"], p["hex"]] for p in PALETTE],
                    studs=f"{w} x {h}", cm=f"{w * STUD_CM:.1f} x {h * STUD_CM:.1f}",
+                   frame_cm=f"{w * STUD_CM + 0.2:.1f} x {h * STUD_CM + 0.2:.1f}",
                    plates=(w // PLATE_STUDS) * (h // PLATE_STUDS), total=w * h, colours=rows)
 
 @app.route("/detect", methods=["POST"])
