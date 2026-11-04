@@ -44,6 +44,7 @@ COLOUR_MODES = {"min": dict(stop=0.010, merge=0.05), "balanced": dict(stop=0.004
 FLAT_MERGE = 6.0       # flat graphics: colour clusters closer than this (CIEDE2000) are the same colour (JPEG noise, anti-aliasing)
 FLAT_DISTINCT = 8.0    # flat graphics: clusters further apart than this should end up as different bricks when the palette allows
 SKIN_RANGE = dict(cr=(133, 173), cb=(77, 127))  # classic YCrCb skin window, used together with the face's own skin colour
+SKIN_PALETTE_DELTA = 12.0  # keep the two skin bricks close in CIEDE2000
 
 def load_sizes(path=os.path.join(BASE, "sizes.csv")):
     """Load the client's standard frame layouts, measured in 16x16-stud plate units."""
@@ -229,7 +230,7 @@ def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
     mask = np.zeros(n, bool); mask[sel] = True
     return mask
 
-def dither_match(lab, strength, skin=None, allowed=None):
+def dither_match(lab, strength, skin=None, allowed=None, skin_palette=None):
     """Pick a brick per cell with error diffusion. Every pick is still one of the 94 palette colours."""
     h, w, _ = lab.shape
     work, idx = lab.copy(), np.zeros((h, w), int)
@@ -241,6 +242,8 @@ def dither_match(lab, strength, skin=None, allowed=None):
                 d2 = np.where(allowed, d2, 1e9)  # colour limit: only the chosen colours may be used
             if skin is not None and skin[y, x]:
                 d2 = np.where(COOL, 1e9, d2)  # skin protection: no green or blue bricks on skin
+                if skin_palette is not None:
+                    d2 = np.where(skin_palette, d2, 1e9)
             cand = np.argpartition(d2, 8)[:8]  # 8 closest, then judge strictly
             i = int(cand[ciede2000(t[None, None, :], PAL_LAB[cand][None, :, :])[0].argmin()])
             idx[y, x] = i
@@ -536,6 +539,41 @@ def adjust_skin(lab, mask, adj):
     mk = mask[..., None]
     return lab * (1 - mk) + out * mk
 
+def pick_skin_palette(lab, skin, face):
+    """Choose the closest pair of warm palette colours whose CIEDE2000 difference is at most 12."""
+    if skin is None or not skin.any():
+        return None
+    candidates = np.flatnonzero((PAL_LAB[:, 1] > 3) & (PAL_LAB[:, 2] > 6))
+    if len(candidates) < 2:
+        return None
+    pts = lab[skin]
+    weights = 1 + 3 * face[skin]
+    errors = ciede2000(pts[:, None, :], PAL_LAB[candidates][None, :, :]) ** 1.5
+    between = ciede2000(PAL_LAB[candidates, None, :], PAL_LAB[None, candidates, :])
+    best_cost, best_pair = np.inf, None
+    for i, colour in enumerate(candidates[:-1]):
+        partners = np.flatnonzero((between[i] <= SKIN_PALETTE_DELTA) & (np.arange(len(candidates)) > i))
+        if not len(partners):
+            continue
+        costs = (weights[:, None] * np.minimum(errors[:, i, None], errors[:, partners])).sum(0)
+        j = int(partners[costs.argmin()])
+        if costs.min() < best_cost:
+            best_cost, best_pair = float(costs.min()), (int(colour), int(candidates[j]))
+    if best_pair is None:
+        return None
+    selected = np.zeros(len(PALETTE), bool)
+    selected[list(best_pair)] = True
+    return selected
+
+def constrain_skin_palette(idx, lab, skin, palette):
+    if palette is None:
+        return idx
+    cells = np.flatnonzero(skin)
+    candidates = np.flatnonzero(palette)
+    distances = ciede2000(lab.reshape(-1, 3)[cells, None, :], PAL_LAB[candidates][None, :, :])
+    idx.ravel()[cells] = candidates[distances.argmin(1)]
+    return idx
+
 def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None, profile="auto", colours="min", skin_adj=None):
     """Return the brick matrix (single source of truth), target colours, errors, face measures and a report dict.
     profile: "auto" (detect), "flat" (flags, logos, illustrations) or "photo". colours: "min", "balanced" or "max" (all capped at 50).
@@ -559,7 +597,8 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
         profile = "photo" if (faces and analysis["flat_frac"] < 0.985) else analysis["profile"]
     face = faces[0] if faces else None
     m = face_mask(w, h, crop.size, face)
-    report = dict(profile=profile, detected=analysis, faces=len(faces), dither=dither, grading=grade["mode"], skin_cells=0.0, dropped=0, allowed=None)
+    report = dict(profile=profile, detected=analysis, faces=len(faces), dither=dither, grading=grade["mode"], skin_cells=0.0,
+                  skin_palette=[], dropped=0, allowed=None)
     if profile == "flat":
         # ---- flat graphics: regions -> majority vote per cell -> one brick per region. No dithering, no auto grading, no sharpening.
         labels, cen, area = flat_cells(crop, w, h)
@@ -592,10 +631,16 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
         if boost > 0 and face is not None:  # extra local contrast on the face only
             L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
         skin_cells = ((smask > 0.5) | ((m > 0.5) & (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 25))) if skin else None
-        allowed = pick_palette(lab, m, MAX_COLOURS, mode["stop"])  # never more than 50; usually far fewer
+        skin_palette = pick_skin_palette(lab, skin_cells, m)
+        reserved = int(skin_palette.sum()) if skin_palette is not None else 0
+        allowed = pick_palette(lab, m, MAX_COLOURS - reserved, mode["stop"])  # reserve room for the coordinated skin colours
+        if skin_palette is not None:
+            allowed |= skin_palette
+            report["skin_palette"] = [PALETTE[i]["code"] for i in np.flatnonzero(skin_palette)]
         report["allowed"] = int(allowed.sum())
-        idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed)
+        idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed, skin_palette)
         idx, report["dropped"] = merge_pass(idx, lab, m, mode["merge"])
+        idx = constrain_skin_palette(idx, lab, skin_cells, skin_palette) if skin_palette is not None else idx
     assert len(np.unique(idx)) <= MAX_COLOURS  # the strict cap, checked on the final matrix
     brick = PAL_LAB[idx]
     raw = ciede2000(lab.reshape(-1, 3), brick.reshape(-1, 3))  # strict, cell by cell

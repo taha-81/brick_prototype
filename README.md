@@ -26,7 +26,9 @@ Photo -> brick mosaic prototype (Flask + NumPy + Pillow + OpenCV).
 **Skin tone adjustment** (`skin_mask`, `adjust_skin`): every detected face seeds a skin colour; cells that look like
 skin (YCrCb window + close to a face's skin colour) are kept when they touch a face (face, ears, neck, chest zone) or
 match a face's skin colour very closely (hands, other people). Brightness, warmth and colour strength are applied in
-Lab to those cells only; 0/0/0 changes nothing. Form fields: `sk_on`, `sk_br`, `sk_warm`, `sk_sat` (-50..50).
+Lab to those cells only; 0/0/0 changes nothing. Skin protection now uses a coordinated pair of warm palette colours
+with at most ΔE 12 between them, preventing unrelated skin shades from appearing side by side. Form fields: `sk_on`,
+`sk_br`, `sk_warm`, `sk_sat` (-50..50).
 
 Form fields added: `colours` (min|balanced|max), `profile` (auto|flat|photo). The old `limit` field still works
 (`limit=0` -> max, otherwise min). The response carries `report` (profile, detection numbers, allowed/dropped
