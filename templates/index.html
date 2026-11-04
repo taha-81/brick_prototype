@@ -284,7 +284,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
     <label>Sharpness <input type="range" id="gsh" min="0" max="100" value="0"></label>
   </div>
   <div class="toggles">
-    <label><input type="checkbox" id="skin" checked> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
+    <label><input type="checkbox" id="skin"> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
     <label><input type="checkbox" id="boost"> Face boost (experimental) <span class="hint">Extra contrast on the face only. Best left off for now.</span></label>
   </div>
 
@@ -448,7 +448,7 @@ $('go').onclick=async()=>{
     if(!fs||!fs.length)return;if(!/^image\/(png|jpeg)$/.test(fs[0].type)){document.getElementById('err').textContent='Please drop a JPG or PNG photo.';return}
     document.getElementById('err').textContent='';const dt=new DataTransfer();dt.items.add(fs[0]);inp.files=dt.files;inp.dispatchEvent(new Event('change'))});
   const preset=(d,g)=>{document.getElementById('dither').value=d;const gm=document.getElementById('gmode');gm.value=g;gm.dispatchEvent(new Event('change'));
-    document.getElementById('boost').checked=false;document.getElementById('skin').checked=true;document.getElementById('climit').value='min'};
+    document.getElementById('boost').checked=false;document.getElementById('skin').checked=false;document.getElementById('climit').value='min'};
   /* skin tone adjustment panel: show values, quick picks, reset */
   const skOn=document.getElementById('skOn'),skPanel=document.getElementById('skPanel'),sk={br:'skBr',warm:'skWarm',sat:'skSat'};
   const skShow=()=>Object.values(sk).forEach(id=>{const v=+document.getElementById(id).value;document.getElementById(id+'V').textContent=(v>0?'+':'')+v});

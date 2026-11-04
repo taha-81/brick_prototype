@@ -749,7 +749,7 @@ def do_convert():
     skin_adj = dict(on=request.form.get("sk_on", "0") == "1", br=num("sk_br", -50, 50), warm=num("sk_warm", -50, 50), sat=num("sk_sat", -50, 50))
     m, photo_rgb, raw, de, crop, face, vs_orig, structure, detail, report = convert(
         img, w, h, box, request.form.get("dither", DEFAULT_DITHER), grade,
-        1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "1") == "1",
+        1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "0") == "1",
         None, profile, colours, skin_adj)
     counts = np.bincount(m.ravel(), minlength=len(PALETTE))
     assert counts.sum() == w * h  # quantities must equal total cells
