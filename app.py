@@ -1,5 +1,5 @@
 """Photo -> brick mosaic prototype: upload, size, palette match, preview, counts.
-Day 5: minimum-colour optimisation (flat-graphic and photo profiles), strict 50-colour cap, skin tone adjustment."""
+Day 5: minimum-colour optimisation (flat-graphic and photo profiles), strict 54-colour cap, skin tone adjustment."""
 import base64, csv, io, math, os
 import re
 from typing import Any
@@ -23,7 +23,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day5-min-colours-1"
+APP_VERSION = "day5-skin-54-2"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -37,7 +37,7 @@ FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-
 STUD_CM, PLATE_STUDS = 0.8, 16  # client module: 16x16 studs (12.8 cm)
 MAX_PLATE_UNITS = 12
 DEFAULT_SIZE = "3x3"
-MAX_COLOURS = 50  # strict client limit: NO mosaic ever uses more than this many of the 94 colours (a maximum, not a target)
+MAX_COLOURS = 54  # strict client limit: NO mosaic ever uses more than this many of the 94 colours (a maximum, not a target)
 # Colour-count modes. "stop": the greedy palette search stops when the next colour would cut the total error by less than this share.
 # "merge": after conversion, a brick colour is dropped when losing it raises the mean blended ΔE by less than this.
 COLOUR_MODES = {"min": dict(stop=0.010, merge=0.05), "balanced": dict(stop=0.004, merge=0.02), "max": dict(stop=0.0, merge=0.0)}
@@ -188,7 +188,7 @@ def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
     Squared-ish error (d ** 1.5) so a few badly matched cells weigh more than many slightly off ones.
     stop: the search ends early once the next colour would cut the remaining error by less than this share (0 = always take k)."""
     n = len(PALETTE)
-    k = min(k, MAX_COLOURS)  # the 50-colour cap is absolute
+    k = min(k, MAX_COLOURS)  # the 54-colour cap is absolute
     if k >= n:
         return np.ones(n, bool)
     pts = lab.reshape(-1, 3)
@@ -495,12 +495,16 @@ def skin_mask(w, h, crop_size, faces, rgb, lab):
     if not faces:
         return np.zeros((h, w))
     warm = (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 20)
+    skin_like = ycrcb_skin(rgb) & warm
     seeds, refs, zone = np.zeros((h, w), bool), [], np.zeros((h, w), bool)
     sx, sy = w / crop_size[0], h / crop_size[1]
     yy, xx = np.mgrid[0:h, 0:w]
     for f in faces:
         fm = face_mask(w, h, crop_size, f) > 0.6
-        cells = fm & warm
+        fx = (xx + .5 - f[0] * sx) / max(f[2] * sx, 1)
+        fy = (yy + .5 - f[1] * sy) / max(f[3] * sy, 1)
+        reference_zone = (fx >= 0.2) & (fx <= 0.8) & (fy >= 0.25) & (fy <= 0.8)
+        cells = fm & reference_zone & skin_like
         if cells.sum() < 4:
             continue
         seeds |= cells
@@ -513,7 +517,7 @@ def skin_mask(w, h, crop_size, faces, rgb, lab):
         return np.zeros((h, w))
     refs = np.array(refs)
     dref = ciede2000(lab.reshape(-1, 1, 3), refs[None, :, :]).min(1).reshape(h, w)
-    cand = ycrcb_skin(rgb) & warm & (dref <= 12)
+    cand = skin_like & (dref <= 12)
     lab_cc, n = components(cand | seeds)
     keep = np.zeros((h, w), bool)
     for i in range(1, n + 1):
@@ -531,7 +535,7 @@ def adjust_skin(lab, mask, adj):
     if adj is None or not adj.get("on") or not mask.any():
         return lab
     L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
-    L2 = L + adj["br"] * 0.4
+    L2 = L + adj["br"] * 0.2
     a2, b2 = a + adj["warm"] * 0.06, b + adj["warm"] * 0.24
     scale = 1 + adj["sat"] / 100
     a2, b2 = a2 * scale, b2 * scale
@@ -576,7 +580,7 @@ def constrain_skin_palette(idx, lab, skin, palette):
 
 def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None, profile="auto", colours="min", skin_adj=None):
     """Return the brick matrix (single source of truth), target colours, errors, face measures and a report dict.
-    profile: "auto" (detect), "flat" (flags, logos, illustrations) or "photo". colours: "min", "balanced" or "max" (all capped at 50).
+    profile: "auto" (detect), "flat" (flags, logos, illustrations) or "photo". colours: "min", "balanced" or "max" (all capped at 54).
     limit (old API): None = "max", anything else = colours mode as given."""
     grade = grade or dict(mode="off", br=0, ct=0, sat=0, sh=0)
     mode = COLOUR_MODES.get(colours, COLOUR_MODES["min"])
@@ -630,7 +634,7 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
         report["skin_cells"] = round(float((smask > 0.5).mean() * 100), 1)
         if boost > 0 and face is not None:  # extra local contrast on the face only
             L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
-        skin_cells = ((smask > 0.5) | ((m > 0.5) & (lab[..., 1] > 3) & (lab[..., 2] > 6) & (lab[..., 0] > 25))) if skin else None
+        skin_cells = (smask > 0.5) if skin else None
         skin_palette = pick_skin_palette(lab, skin_cells, m)
         reserved = int(skin_palette.sum()) if skin_palette is not None else 0
         allowed = pick_palette(lab, m, MAX_COLOURS - reserved, mode["stop"])  # reserve room for the coordinated skin colours
@@ -706,7 +710,7 @@ def do_convert():
         None, profile, colours, skin_adj)
     counts = np.bincount(m.ravel(), minlength=len(PALETTE))
     assert counts.sum() == w * h  # quantities must equal total cells
-    assert int((counts > 0).sum()) <= MAX_COLOURS  # strict 50-colour cap on the final mosaic (counts, CSV and stats all come from this matrix)
+    assert int((counts > 0).sum()) <= MAX_COLOURS  # strict 54-colour cap on the final mosaic (counts, CSV and stats all come from this matrix)
     rows = [dict(code=PALETTE[i]["code"], name=PALETTE[i]["name"], hex=PALETTE[i]["hex"], count=int(c))
             for i, c in enumerate(counts) if c]
     rows.sort(key=lambda r: -int(r["count"]))
