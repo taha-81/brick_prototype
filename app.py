@@ -23,7 +23,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day5-skin-54-2"
+APP_VERSION = "day5-face-detail-54-3"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -32,7 +32,8 @@ app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requ
 def too_big(_):
     return jsonify(error="The photo is too large. Try a smaller photo."), 413
 DITHER = {"off": 0.0, "soft": 0.5, "normal": 0.8, "strong": 1.0}  # strength on the background
-FACE_KEEP = 0.25  # on the face, dithering is cut to this share, so eyes and lips stay crisp
+DEFAULT_DITHER = "soft"
+FACE_KEEP = 0.25  # on the face, dithering is cut to this share
 FS = ((0, 1, 7 / 16), (1, -1, 3 / 16), (1, 0, 5 / 16), (1, 1, 1 / 16))  # Floyd-Steinberg
 STUD_CM, PLATE_STUDS = 0.8, 16  # client module: 16x16 studs (12.8 cm)
 MAX_PLATE_UNITS = 12
@@ -45,6 +46,7 @@ FLAT_MERGE = 6.0       # flat graphics: colour clusters closer than this (CIEDE2
 FLAT_DISTINCT = 8.0    # flat graphics: clusters further apart than this should end up as different bricks when the palette allows
 SKIN_RANGE = dict(cr=(133, 173), cb=(77, 127))  # classic YCrCb skin window, used together with the face's own skin colour
 SKIN_PALETTE_DELTA = 12.0  # keep the two skin bricks close in CIEDE2000
+MAX_SKIN_COLOURS = 4
 
 def load_sizes(path=os.path.join(BASE, "sizes.csv")):
     """Load the client's standard frame layouts, measured in 16x16-stud plate units."""
@@ -182,7 +184,32 @@ def strength_map(m, base):
     """Dithering strength per cell: full on the background, much lower on and around the face."""
     return base * (1 - (1 - FACE_KEEP) * m)
 
-def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
+def face_detail_mask(lab, face_mask_values, face, crop_size):
+    """Find high-frequency facial features inside the detected face, without treating the whole face as one region."""
+    if face is None:
+        return np.zeros(face_mask_values.shape)
+    h, w = face_mask_values.shape
+    sx, sy = w / crop_size[0], h / crop_size[1]
+    yy, xx = np.mgrid[0:h, 0:w]
+    fx = (xx + .5 - face[0] * sx) / max(face[2] * sx, 1)
+    fy = (yy + .5 - face[1] * sy) / max(face[3] * sy, 1)
+    feature_area = ((fx >= 0.08) & (fx <= 0.92) & (fy >= 0.2) & (fy <= 0.98)
+                    & (face_mask_values > 0.35))
+    if feature_area.sum() < 8:
+        return np.zeros(face_mask_values.shape)
+    lightness = lab[..., 0]
+    local = np.abs(lightness - blurL(lightness))
+    gx = np.zeros_like(lightness); gy = np.zeros_like(lightness)
+    gx[:, 1:] = np.abs(lightness[:, 1:] - lightness[:, :-1])
+    gy[1:, :] = np.abs(lightness[1:, :] - lightness[:-1, :])
+    score = local + 0.2 * np.hypot(gx, gy)
+    samples = score[feature_area]
+    low, high = np.percentile(samples, (60, 95))
+    if high <= low:
+        return np.zeros(face_mask_values.shape)
+    return np.clip((score - low) / (high - low), 0, 1) * feature_area
+
+def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0, detail=None):
     """Choose at most k palette colours that serve this photo best. Returns a True/False mask over the 94 colours.
     Greedy pick (add the colour that cuts the total error most), then swaps to polish. The face counts 4x, so skin tones win.
     Squared-ish error (d ** 1.5) so a few badly matched cells weigh more than many slightly off ones.
@@ -192,7 +219,10 @@ def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
     if k >= n:
         return np.ones(n, bool)
     pts = lab.reshape(-1, 3)
-    w = (1 + 3 * m).reshape(-1)
+    weights = 1 + 3 * m
+    if detail is not None:
+        weights = weights + 4 * detail
+    w = weights.reshape(-1)
     step = 1.0 if len(pts) <= 20000 else 2.0  # merge near-identical cells: same result, much less work
     _, inv = np.unique(np.round(pts / step).astype(int), axis=0, return_inverse=True)
     inv = inv.ravel()
@@ -230,7 +260,7 @@ def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0):
     mask = np.zeros(n, bool); mask[sel] = True
     return mask
 
-def dither_match(lab, strength, skin=None, allowed=None, skin_palette=None):
+def dither_match(lab, strength, skin=None, allowed=None, skin_palette=None, detail=None):
     """Pick a brick per cell with error diffusion. Every pick is still one of the 94 palette colours."""
     h, w, _ = lab.shape
     work, idx = lab.copy(), np.zeros((h, w), int)
@@ -249,7 +279,7 @@ def dither_match(lab, strength, skin=None, allowed=None, skin_palette=None):
             idx[y, x] = i
             err = t - PAL_LAB[i]; n = np.linalg.norm(err)
             if n > 20: err *= 20 / n  # stop streaks when the photo colour is outside the palette
-            err *= strength[y, x]
+            err *= strength[y, x] * (1 - 0.8 * detail[y, x] if detail is not None else 1)
             for dy, dx, wt in FS:
                 yy, xx = y + dy, x + dx
                 if 0 <= yy < h and 0 <= xx < w:
@@ -544,7 +574,7 @@ def adjust_skin(lab, mask, adj):
     return lab * (1 - mk) + out * mk
 
 def pick_skin_palette(lab, skin, face):
-    """Choose the closest pair of warm palette colours whose CIEDE2000 difference is at most 12."""
+    """Choose up to four warm skin shades in a connected, gradual CIEDE2000 range."""
     if skin is None or not skin.any():
         return None
     candidates = np.flatnonzero((PAL_LAB[:, 1] > 3) & (PAL_LAB[:, 2] > 6))
@@ -554,19 +584,27 @@ def pick_skin_palette(lab, skin, face):
     weights = 1 + 3 * face[skin]
     errors = ciede2000(pts[:, None, :], PAL_LAB[candidates][None, :, :]) ** 1.5
     between = ciede2000(PAL_LAB[candidates, None, :], PAL_LAB[None, candidates, :])
-    best_cost, best_pair = np.inf, None
-    for i, colour in enumerate(candidates[:-1]):
-        partners = np.flatnonzero((between[i] <= SKIN_PALETTE_DELTA) & (np.arange(len(candidates)) > i))
-        if not len(partners):
-            continue
-        costs = (weights[:, None] * np.minimum(errors[:, i, None], errors[:, partners])).sum(0)
-        j = int(partners[costs.argmin()])
-        if costs.min() < best_cost:
-            best_cost, best_pair = float(costs.min()), (int(colour), int(candidates[j]))
-    if best_pair is None:
-        return None
+    costs = (weights[:, None] * errors).sum(0)
+    first = int(costs.argmin())
+    selected_indices = [first]
+    current = errors[:, first].copy()
+    while len(selected_indices) < min(MAX_SKIN_COLOURS, len(candidates)):
+        selected = np.array(selected_indices)
+        connected = (between[:, selected] <= SKIN_PALETTE_DELTA).any(1)
+        contained = (between[:, selected] <= SKIN_PALETTE_DELTA * 2).all(1)
+        feasible = connected & contained
+        feasible[selected] = False
+        if not feasible.any():
+            break
+        new_cost = (weights[:, None] * np.minimum(current[:, None], errors)).sum(0)
+        new_cost[~feasible] = np.inf
+        chosen = int(new_cost.argmin())
+        if not np.isfinite(new_cost[chosen]) or new_cost[chosen] >= (weights * current).sum():
+            break
+        selected_indices.append(chosen)
+        current = np.minimum(current, errors[:, chosen])
     selected = np.zeros(len(PALETTE), bool)
-    selected[list(best_pair)] = True
+    selected[candidates[selected_indices]] = True
     return selected
 
 def constrain_skin_palette(idx, lab, skin, palette):
@@ -578,7 +616,7 @@ def constrain_skin_palette(idx, lab, skin, palette):
     idx.ravel()[cells] = candidates[distances.argmin(1)]
     return idx
 
-def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=True, limit=None, profile="auto", colours="min", skin_adj=None):
+def convert(img, w, h, box=None, dither=DEFAULT_DITHER, grade=None, boost=1.0, skin=True, limit=None, profile="auto", colours="min", skin_adj=None):
     """Return the brick matrix (single source of truth), target colours, errors, face measures and a report dict.
     profile: "auto" (detect), "flat" (flags, logos, illustrations) or "photo". colours: "min", "balanced" or "max" (all capped at 54).
     limit (old API): None = "max", anything else = colours mode as given."""
@@ -632,17 +670,22 @@ def convert(img, w, h, box=None, dither="normal", grade=None, boost=1.0, skin=Tr
             lab = adjust_skin(lab, smask, skin_adj)  # skin cells only; clothing and background are untouched
             rgb = np.where((smask > 0)[..., None], lab_to_srgb(lab.reshape(-1, 3)).reshape(h, w, 3), rgb)
         report["skin_cells"] = round(float((smask > 0.5).mean() * 100), 1)
+        detail = face_detail_mask(lab, m, face, crop.size)
+        if face is not None:
+            local = lab[..., 0] - blurL(lab[..., 0])
+            lab[..., 0] = np.clip(lab[..., 0] + 0.75 * detail * local, 0, 100)
+        report["face_detail_cells"] = round(float((detail > 0.5).mean() * 100), 1)
         if boost > 0 and face is not None:  # extra local contrast on the face only
             L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)
         skin_cells = (smask > 0.5) if skin else None
         skin_palette = pick_skin_palette(lab, skin_cells, m)
         reserved = int(skin_palette.sum()) if skin_palette is not None else 0
-        allowed = pick_palette(lab, m, MAX_COLOURS - reserved, mode["stop"])  # reserve room for the coordinated skin colours
+        allowed = pick_palette(lab, m, MAX_COLOURS - reserved, mode["stop"], detail)  # reserve room for skin shades and facial detail
         if skin_palette is not None:
             allowed |= skin_palette
             report["skin_palette"] = [PALETTE[i]["code"] for i in np.flatnonzero(skin_palette)]
         report["allowed"] = int(allowed.sum())
-        idx = dither_match(lab, strength_map(m, DITHER.get(dither, 0.8)), skin_cells, allowed, skin_palette)
+        idx = dither_match(lab, strength_map(m, DITHER.get(dither, DITHER[DEFAULT_DITHER])), skin_cells, allowed, skin_palette, detail)
         idx, report["dropped"] = merge_pass(idx, lab, m, mode["merge"])
         idx = constrain_skin_palette(idx, lab, skin_cells, skin_palette) if skin_palette is not None else idx
     assert len(np.unique(idx)) <= MAX_COLOURS  # the strict cap, checked on the final matrix
@@ -705,7 +748,7 @@ def do_convert():
         profile = "auto"
     skin_adj = dict(on=request.form.get("sk_on", "0") == "1", br=num("sk_br", -50, 50), warm=num("sk_warm", -50, 50), sat=num("sk_sat", -50, 50))
     m, photo_rgb, raw, de, crop, face, vs_orig, structure, detail, report = convert(
-        img, w, h, box, request.form.get("dither", "normal"), grade,
+        img, w, h, box, request.form.get("dither", DEFAULT_DITHER), grade,
         1.0 if request.form.get("boost", "1") == "1" else 0.0, request.form.get("skin", "1") == "1",
         None, profile, colours, skin_adj)
     counts = np.bincount(m.ravel(), minlength=len(PALETTE))

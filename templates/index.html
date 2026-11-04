@@ -229,7 +229,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   <div class="size-picker">
     <label class="field"><span>Mosaic size</span>
       <select id="size" hidden>{% for o,rows in groups %}<optgroup label="{{o}}">{% for r in rows %}<option value="{{r.key}}"{% if r.key==default_size %} selected{% endif %}>{{r.label}}</option>{% endfor %}</optgroup>{% endfor %}</select>
-      <span class="hint">Each plate unit is 16 x 16 studs (12.8 cm). Frame openings add 0.2 cm to each overall dimension.</span>
+      <span class="hint">Each plate unit is 16 x 16 studs (12.8 cm). For portrait detail, choose Portrait 6×8 (96×128 bricks) or larger, then frame the face prominently. Frame openings add 0.2 cm to each overall dimension.</span>
     </label>
     <div class="orientation-tabs" role="group" aria-label="Mosaic orientation">
       {% for orientation in ['Square','Landscape','Portrait','Custom'] %}
@@ -259,8 +259,8 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   </div>
   <div class="two">
     <label class="field"><span>Colour mixing</span>
-      <select id="dither"><option value="off">Dithering: Off</option><option value="soft">Dithering: Soft</option><option value="normal" selected>Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
-      <span class="hint">Mixes nearby brick colours so shading looks smooth from a distance.</span>
+      <select id="dither"><option value="off">Dithering: Off</option><option value="soft" selected>Dithering: Soft (recommended)</option><option value="normal">Dithering: Normal</option><option value="strong">Dithering: Strong</option></select>
+      <span class="hint">Soft mixing keeps photo shading while reducing speckling around facial details.</span>
     </label>
     <label class="field"><span>Photo touch-up</span>
       <select id="gmode"><option value="off">Grading: Off</option><option value="auto" selected>Grading: Auto</option><option value="custom">Grading: Custom</option></select>
@@ -309,7 +309,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
         <p>Dithering Soft, Grading Auto, Fewest colours, Skin protection on, Face boost off. Zoom in so the face fills most of the frame.</p>
         <button type="button" class="alt" id="preSmall">Use small settings</button></div>
       <div><h5>Large mosaics (6 or more plate units per side)</h5>
-        <p>Dithering Normal, Grading Auto, Fewest colours, Skin protection on, Face boost off. Zoom out a little to include hair and shoulders. Flags, logos and cartoons: leave Image type on automatic, they are detected and converted with the fewest possible colours and no mixing.</p>
+        <p>Dithering Soft, Grading Auto, Fewest colours, Skin protection on, Face boost off. For portraits, use a portrait size such as 6×8 or larger and frame the face prominently. Flags, logos and cartoons: leave Image type on automatic, they are detected and converted with the fewest possible colours and no mixing.</p>
         <button type="button" class="alt" id="preLarge">Use large settings</button></div>
     </div>
   </details>
@@ -380,7 +380,7 @@ function cropBox(){return{cx:-E.ox/(E.nw*E.k),cy:-E.oy/(E.nh*E.k),cw:E.Fw/(E.nw*
   const up=e=>{P.delete(e.pointerId);pd=0};fr.addEventListener('pointerup',up);fr.addEventListener('pointercancel',up)})();
 $('zi').onclick=()=>E&&eZoom(E.Fw/2,E.Fh/2,1.25);$('zo').onclick=()=>E&&eZoom(E.Fw/2,E.Fh/2,1/1.25);
 function cover(){E.k=E.k0;E.ox=(E.Fw-E.nw*E.k)/2;E.oy=(E.Fh-E.nh*E.k)/2;eApply()}
-function frameOnFace(){const f=E.face;E.k=Math.max(E.k0,0.40*E.Fh/(f.h*E.nh));E.ox=E.Fw/2-f.cx*E.nw*E.k;E.oy=E.Fh*0.42-f.cy*E.nh*E.k;eApply()}
+function frameOnFace(){const f=E.face;E.k=Math.max(E.k0,0.52*E.Fh/(f.h*E.nh));E.ox=E.Fw/2-f.cx*E.nw*E.k;E.oy=E.Fh*0.42-f.cy*E.nh*E.k;eApply()}
 $('zr').onclick=()=>{if(!E)return;E.face?frameOnFace():cover()};
 $('photo').onchange=()=>{const f=$('photo').files[0];if(!f)return;const im=$('eimg');
   im.onload=async()=>{E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Preparing photo...';
@@ -459,7 +459,7 @@ $('go').onclick=async()=>{
   document.getElementById('skReset').addEventListener('click',()=>skSet(0,0,0));
   skShow();
   document.getElementById('preSmall').onclick=()=>preset('soft','auto');
-  document.getElementById('preLarge').onclick=()=>preset('normal','auto');
+  document.getElementById('preLarge').onclick=()=>preset('soft','auto');
   const size=document.getElementById('size'),tabs=[...document.querySelectorAll('[data-orientation-tab]')];
   const panels=[...document.querySelectorAll('[data-orientation-panel]')],options=[...document.querySelectorAll('[data-size-option]')];
   const customWidth=document.getElementById('customWidth'),customHeight=document.getElementById('customHeight');
