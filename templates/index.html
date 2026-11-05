@@ -195,6 +195,14 @@ details.read summary{cursor:pointer;color:var(--blue);font-weight:700}
 #insp .sw{border-radius:3px}
 .views{gap:16px;margin-top:8px}
 .pane h4{font-family:var(--display);font-weight:600;font-size:15px;margin:4px 0 8px}
+.enhancer-preview{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;margin:6px 0}
+.enhancer-images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.enhancer-images figure{margin:0;min-width:0}
+.enhancer-images figcaption{font-size:13px;font-weight:700;margin-bottom:4px}
+.enhancer-images img{display:block;width:100%;height:180px;object-fit:contain;background:#222;border-radius:6px}
+.enhancer-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.enhancer-actions button{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+.enhancer-actions button[aria-pressed=true]{background:var(--blue);color:#fff}
 .vp{border-radius:6px;box-shadow:0 0 0 1px var(--line)}
 .bricks-h{margin:26px 0 10px}
 .bricks-h h4{font-family:var(--display);font-size:18px}
@@ -286,6 +294,18 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 32px;color:var(--mute);font
   <div class="toggles">
     <label><input type="checkbox" id="skin"> Skin protection <span class="hint">Never puts green or blue bricks on skin.</span></label>
     <label><input type="checkbox" id="boost"> Face boost (experimental) <span class="hint">Extra contrast on the face only. Best left off for now.</span></label>
+    <label><input type="checkbox" id="photoEnhancer"> Photo Enhancer <span class="hint">Optional local smoothing and gentle colour simplification. Preview and compare before using it.</span></label>
+  </div>
+  <div id="enhancerPreview" class="enhancer-preview" hidden>
+    <p id="enhancerStatus" class="hint" aria-live="polite"></p>
+    <div class="enhancer-images">
+      <figure><figcaption>Original</figcaption><img id="enhancerOriginal" alt="Original photo preview"></figure>
+      <figure><figcaption>Enhanced</figcaption><img id="enhancerEnhanced" alt="Enhanced photo preview"></figure>
+    </div>
+    <div class="enhancer-actions">
+      <button type="button" id="useOriginal" aria-pressed="true">Use original</button>
+      <button type="button" id="useEnhanced" aria-pressed="false">Use enhanced</button>
+    </div>
   </div>
 
   <div class="skin-box">
@@ -358,8 +378,28 @@ async function shrink(im){let side=2000,blob;  // phone photos are huge; the ser
     g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(im,0,0,c.width,c.height);
     blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(blob.size<3.5e6)break;side*=0.75}
   return blob}
-function cropURL(w,h){const b=cropBox(),c=document.createElement('canvas');c.width=Math.min(1200,w*10);c.height=Math.round(c.width*h/w);
-  c.getContext('2d').drawImage($('eimg'),b.cx*E.nw,b.cy*E.nh,b.cw*E.nw,b.ch*E.nh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.9)}
+function cropURL(w,h,image=$('eimg')){const b=cropBox(),c=document.createElement('canvas');c.width=Math.min(1200,w*10);c.height=Math.round(c.width*h/w);
+  c.getContext('2d').drawImage(image,b.cx*image.naturalWidth,b.cy*image.naturalHeight,b.cw*image.naturalWidth,b.ch*image.naturalHeight,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.9)}
+function releaseEnhancer(state){[state.originalPreviewURL,state.enhancedPreviewURL].filter(Boolean).forEach(URL.revokeObjectURL)}
+function showEnhancerChoice(){if(!E||!E.enhancedBlob)return;$('enhancerPreview').hidden=false;
+  const enhanced=$('photoEnhancer').checked;$('enhancerStatus').textContent=enhanced?'Enhanced image selected for mosaic. Compare both previews, or choose the original below.':'Original image selected for mosaic. The enhanced preview remains available for comparison.';
+  $('useOriginal').setAttribute('aria-pressed',String(!enhanced));$('useEnhanced').setAttribute('aria-pressed',String(enhanced))}
+async function prepareEnhancement(){if(!E||!E.blob){$('err').textContent='Choose a photo before enabling Photo Enhancer.';return}
+  const current=E;$('err').textContent='';
+  if(!current.enhancedBlob){$('enhancerPreview').hidden=false;$('enhancerStatus').textContent='Creating a local enhanced preview...';
+    $('go').disabled=true;$('go').textContent='Enhancing...';
+    try{const fd=new FormData();fd.append('photo',current.blob,'photo.jpg');const response=await fetch('/enhance',{method:'POST',body:fd});
+      if(!response.ok){let data;try{data=await response.json()}catch(_){data={error:'The enhancement service returned an invalid response.'}}throw new Error(data.error||'Photo enhancement failed.')}
+      const blob=await response.blob(),url=URL.createObjectURL(blob),image=new Image();
+      await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('The enhanced preview could not be displayed.'));image.src=url});
+      if(E!==current){URL.revokeObjectURL(url);return}
+      current.enhancedBlob=blob;current.enhancedImage=image;current.enhancedPreviewURL=url;
+      current.originalPreviewURL=URL.createObjectURL(current.blob);
+      $('enhancerOriginal').src=current.originalPreviewURL;$('enhancerEnhanced').src=url;
+    }catch(error){if(E===current){$('photoEnhancer').checked=false;$('enhancerPreview').hidden=true;$('err').textContent=error.message||'Photo enhancement failed.'}return}
+    finally{if(E===current&&$('go').textContent==='Enhancing...'){$('go').disabled=false;$('go').textContent='Convert'}}
+  }
+  if(E===current)showEnhancerChoice()}
 function eApply(){if(!E)return;const im=$('eimg');
   E.k=Math.min(E.k0*8,Math.max(E.k0,E.k));const W=E.nw*E.k,H=E.nh*E.k;
   E.ox=Math.min(0,Math.max(E.Fw-W,E.ox));E.oy=Math.min(0,Math.max(E.Fh-H,E.oy));
@@ -383,10 +423,11 @@ function cover(){E.k=E.k0;E.ox=(E.Fw-E.nw*E.k)/2;E.oy=(E.Fh-E.nh*E.k)/2;eApply()
 function frameOnFace(){const f=E.face;E.k=Math.max(E.k0,0.52*E.Fh/(f.h*E.nh));E.ox=E.Fw/2-f.cx*E.nw*E.k;E.oy=E.Fh*0.42-f.cy*E.nh*E.k;eApply()}
 $('zr').onclick=()=>{if(!E)return;E.face?frameOnFace():cover()};
 $('photo').onchange=()=>{const f=$('photo').files[0];if(!f)return;const im=$('eimg');
-  im.onload=async()=>{E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Preparing photo...';
+  im.onload=async()=>{if(E)releaseEnhancer(E);$('enhancerPreview').hidden=true;$('err').textContent='';E={nw:im.naturalWidth,nh:im.naturalHeight};$('editor').hidden=false;eLayout();$('fstat').textContent='Preparing photo...';
     try{const mineE=E;mineE.blob=await shrink(im);$('fstat').textContent='Looking for a face...';const fd=new FormData();fd.append('photo',mineE.blob,'photo.jpg');const d=await (await fetch('/detect',{method:'POST',body:fd})).json();const mine=E;
       if(d.face){mine.face=d.face;frameOnFace();$('fstat').textContent='Face found. The frame is centred on it, you can still move the photo.'}
-      else $('fstat').textContent=d.unavailable?'Face detection is off: '+d.unavailable+' Place the photo yourself.':'No front-facing face found. Place the photo yourself.'}catch(e){$('fstat').textContent=''}};im.src=URL.createObjectURL(f)};
+      else $('fstat').textContent=d.unavailable?'Face detection is off: '+d.unavailable+' Place the photo yourself.':'No front-facing face found. Place the photo yourself.';
+      if($('photoEnhancer').checked)await prepareEnhancement()}catch(e){$('fstat').textContent=e.message||'Photo preparation failed.'}};im.src=URL.createObjectURL(f)};
 $('size').onchange=()=>{eLayout();if(E&&E.face)frameOnFace()};
 /* ---------- result view ---------- */
 function layout(){if(D)['vpL','vpR'].forEach(i=>{const v=$(i);v.style.height=(v.clientWidth*D.h/D.w)+'px'});eLayout()}
@@ -414,13 +455,18 @@ function setLeft(m){if(!D)return;if(m==2&&!PV)m=1;$('l1').className=m==1?'on':'a
 $('l1').onclick=()=>setLeft(1);$('l2').onclick=()=>setLeft(2);
 $('gmode').onchange=()=>{$('sliders').hidden=$('gmode').value!='custom'};
 $('m1').onclick=()=>setMode(1);$('m2').onclick=()=>setMode(2);
+$('photoEnhancer').addEventListener('change',()=>{if($('photoEnhancer').checked)prepareEnhancement();else showEnhancerChoice()});
+$('useOriginal').onclick=()=>{if($('photoEnhancer').checked){$('photoEnhancer').checked=false;$('photoEnhancer').dispatchEvent(new Event('change'))}};
+$('useEnhanced').onclick=()=>{if(!$('photoEnhancer').checked){$('photoEnhancer').checked=true;$('photoEnhancer').dispatchEvent(new Event('change'))}};
 $('go').onclick=async()=>{
   $('err').textContent='';const f=$('photo').files[0];
   if(!f||!E){$('err').textContent='Choose a photo first.';return}
   if(!$('size').value){$('err').textContent='Enter a valid mosaic size.';return}
   if(!E.blob){$('err').textContent='The photo is still being prepared. Try again in a moment.';return}
-  const fd=new FormData();fd.append('photo',E.blob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('colours',$('climit').value);fd.append('profile',$('profile').value);fd.append('sk_on',$('skOn').checked?'1':'0');fd.append('sk_br',$('skBr').value);fd.append('sk_warm',$('skWarm').value);fd.append('sk_sat',$('skSat').value);
-  const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh);$('go').disabled=true;$('go').textContent='Converting...';
+  if($('photoEnhancer').checked&&!E.enhancedBlob){await prepareEnhancement();if(!E.enhancedBlob){$('err').textContent=$('err').textContent||'Wait for the enhanced preview before converting.';return}}
+  const sourceBlob=$('photoEnhancer').checked?E.enhancedBlob:E.blob;
+  const fd=new FormData();fd.append('photo',sourceBlob,'photo.jpg');fd.append('size',$('size').value);fd.append('dither',$('dither').value);fd.append('gmode',$('gmode').value);['gbr','gct','gsat','gsh'].forEach(k=>fd.append(k,$(k).value));fd.append('boost',$('boost').checked?'1':'0');fd.append('skin',$('skin').checked?'1':'0');fd.append('colours',$('climit').value);fd.append('profile',$('profile').value);fd.append('sk_on',$('skOn').checked?'1':'0');fd.append('sk_br',$('skBr').value);fd.append('sk_warm',$('skWarm').value);fd.append('sk_sat',$('skSat').value);
+  const b=cropBox();for(const k in b)fd.append(k,b[k]);const [gw,gh]=SZ[$('size').value],origURL=cropURL(gw,gh,$('photoEnhancer').checked?E.enhancedImage:$('eimg'));$('go').disabled=true;$('go').textContent='Converting...';
   try{const r=await fetch('/convert',{method:'POST',body:fd});let d;
     try{d=await r.json()}catch(_){$('err').textContent=r.status==413?'The photo is too large for the server.':'The server could not finish (error '+r.status+'). Try a smaller size.';return}
     if(!r.ok){$('err').textContent=d.error;return}

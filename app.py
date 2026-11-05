@@ -23,7 +23,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day5-face-detail-54-3"
+APP_VERSION = "day5-photo-enhancer-54-4"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -84,6 +84,43 @@ def load_palette(path=os.path.join(BASE, "palette_94.csv")):
         rows = list(csv.DictReader(f))
     rgb = np.array([[int(r["hex"][i:i + 2], 16) for i in (1, 3, 5)] for r in rows], float)
     return rows, rgb
+
+def enhance_photo(img):
+    """Apply a moderate, local OpenCV cartoon effect while retaining the source dimensions."""
+    if cv2 is None or not hasattr(cv2, "bilateralFilter") or not hasattr(cv2, "kmeans"):
+        raise RuntimeError("OpenCV photo enhancement is unavailable.")
+    source = np.asarray(img.convert("RGB"))
+    scale = min(1.0, 1200 / max(source.shape[:2]))
+    if scale < 1:
+        width, height = round(source.shape[1] * scale), round(source.shape[0] * scale)
+        source = cv2.resize(source, (width, height), interpolation=cv2.INTER_AREA)
+
+    smooth = cv2.bilateralFilter(source, 9, 38, 34)
+    smooth = cv2.bilateralFilter(smooth, 7, 30, 26)
+    lab = cv2.cvtColor(smooth, cv2.COLOR_RGB2LAB)
+    pixels = lab.reshape(-1, 3).astype(np.float32)
+    rng = np.random.default_rng(0)
+    sample = pixels if len(pixels) <= 20000 else pixels[rng.choice(len(pixels), 20000, replace=False)]
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 22, 0.7)
+    _, _, centres = cv2.kmeans(sample, 20, None, criteria, 2, cv2.KMEANS_PP_CENTERS)
+    quantized = np.empty_like(pixels)
+    for start in range(0, len(pixels), 8192):
+        block = pixels[start:start + 8192]
+        distances = ((block[:, None, :] - centres[None, :, :]) ** 2).sum(2)
+        quantized[start:start + len(block)] = centres[distances.argmin(1)]
+    quantized = np.clip(quantized.reshape(lab.shape), 0, 255).astype(np.uint8)
+    simplified = cv2.cvtColor(quantized, cv2.COLOR_LAB2RGB)
+
+    gray = cv2.cvtColor(source, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 55, 125)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8))
+    blend = np.where(edges > 0, 0.26, 0.54)[..., None]
+    result = smooth.astype(np.float32) * (1 - blend) + simplified.astype(np.float32) * blend
+    result = np.where(edges[..., None] > 0, result * 0.86 + source.astype(np.float32) * 0.14, result)
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    if scale < 1:
+        result = cv2.resize(result, (img.width, img.height), interpolation=cv2.INTER_LANCZOS4)
+    return Image.fromarray(result, "RGB")
 
 def srgb_to_lab(rgb):
     c = rgb / 255.0
@@ -788,6 +825,26 @@ def detect():
         return jsonify(face=None)
     iw, ih = img.size
     return jsonify(face=dict(cx=(fb[0] + fb[2] / 2) / iw, cy=(fb[1] + fb[3] / 2) / ih, w=fb[2] / iw, h=fb[3] / ih))
+
+@app.route("/enhance", methods=["POST"])
+def enhance():
+    if cv2 is None or not hasattr(cv2, "bilateralFilter") or not hasattr(cv2, "kmeans"):
+        return jsonify(error="Photo enhancement is unavailable because OpenCV is not installed."), 503
+    f = request.files.get("photo")
+    if f is None:
+        return jsonify(error="Choose a photo to enhance."), 400
+    try:
+        img = ImageOps.exif_transpose(Image.open(f.stream)).convert("RGB")
+    except Exception:
+        return jsonify(error="That file is not a valid image."), 400
+    try:
+        result = enhance_photo(img)
+    except Exception as e:
+        app.logger.exception("Photo enhancement failed")
+        return jsonify(error=f"Photo enhancement failed ({type(e).__name__})."), 500
+    buf = io.BytesIO()
+    result.save(buf, "JPEG", quality=94, subsampling=0)
+    return app.response_class(buf.getvalue(), mimetype="image/jpeg")
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -38,6 +38,12 @@ Form fields added: `colours` (min|balanced|max), `profile` (auto|flat|photo). Th
 (`limit=0` -> max, otherwise min). The response carries `report` (profile, detection numbers, allowed/dropped
 colours, skin coverage) and `limit` (54).
 
+**Photo Enhancer** is an optional, local OpenCV preprocessing step. It applies bilateral edge-preserving smoothing,
+moderate Lab colour clustering and edge-aware blending to create a visibly more illustrated image while retaining
+important boundaries. The `/enhance` endpoint returns a preview image; the browser shows it beside the original
+and uses the enhanced file for mosaic conversion only when the checkbox is enabled. No external API or cloud image
+service is used. It is unchecked by default.
+
 ## Run
 
     pip install -r requirements.txt
