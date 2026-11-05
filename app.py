@@ -23,7 +23,7 @@ except ImportError:
 except Exception as e:  # anything else: face help is off, everything else still works
     _FACE, FACE_WHY = None, f"Face detection could not start ({type(e).__name__})."
 
-APP_VERSION = "day5-photo-enhancer-54-4"
+APP_VERSION = "day5-small-frame-detail-54-5"
 app = Flask(__name__)
 BASE = os.path.dirname(os.path.abspath(__file__))  # data files are found next to app.py, wherever the server starts
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024  # Vercel refuses bigger requests anyway (about 4.5 MB)
@@ -245,6 +245,31 @@ def face_detail_mask(lab, face_mask_values, face, crop_size):
     if high <= low:
         return np.zeros(face_mask_values.shape)
     return np.clip((score - low) / (high - low), 0, 1) * feature_area
+
+def small_frame_face_detail(crop, w, h, face, face_mask_values):
+    """Pool fine source-image contrast into the face cells before small-frame details disappear."""
+    if cv2 is None or face is None:
+        return np.zeros((h, w))
+    source = np.asarray(crop.convert("RGB"))
+    gray = cv2.cvtColor(source, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    cell_scale = max(crop.width / w, crop.height / h)
+    sigma = max(1.0, cell_scale * 0.22)
+    local_contrast = np.abs(gray - cv2.GaussianBlur(gray, (0, 0), sigmaX=sigma))
+    pooled = cv2.resize(local_contrast, (w, h), interpolation=cv2.INTER_AREA)
+
+    sx, sy = w / crop.width, h / crop.height
+    yy, xx = np.mgrid[0:h, 0:w]
+    fx = (xx + .5 - face[0] * sx) / max(face[2] * sx, 1)
+    fy = (yy + .5 - face[1] * sy) / max(face[3] * sy, 1)
+    feature_area = ((fx >= 0.08) & (fx <= 0.92) & (fy >= 0.2) & (fy <= 0.98)
+                    & (face_mask_values > 0.35))
+    values = pooled[feature_area]
+    if values.size < 8:
+        return np.zeros((h, w))
+    low, high = np.percentile(values, (55, 95))
+    if high <= low:
+        return np.zeros((h, w))
+    return np.clip((pooled - low) / (high - low), 0, 1) * feature_area
 
 def pick_palette(lab, m, k=MAX_COLOURS, stop=0.0, detail=None):
     """Choose at most k palette colours that serve this photo best. Returns a True/False mask over the 94 colours.
@@ -666,14 +691,15 @@ def convert(img, w, h, box=None, dither=DEFAULT_DITHER, grade=None, boost=1.0, s
         crop = img.crop((round(box[0] * iw), round(box[1] * ih), round((box[0] + box[2]) * iw), round((box[1] + box[3]) * ih)))
     else:
         crop = center_crop(img, w, h)
-    upscaled = crop.width < w or crop.height < h
-    resampling = Image.Resampling.LANCZOS if upscaled else Image.Resampling.BOX
-    rgb0 = np.asarray(crop.resize((w, h), resampling), float)  # interpolate small photos; average larger photos per cell
-    orig_lab = srgb_to_lab(rgb0.reshape(-1, 3)).reshape(h, w, 3)
     analysis = analyse_image(crop)
     faces = detect_faces(crop)
     if profile == "auto":  # a real face on a plain background is still a photograph
         profile = "photo" if (faces and analysis["flat_frac"] < 0.985) else analysis["profile"]
+    small_photo = profile == "photo" and max(w, h) <= PLATE_STUDS * 4
+    upscaled = crop.width < w or crop.height < h
+    resampling = Image.Resampling.LANCZOS if upscaled or small_photo else Image.Resampling.BOX
+    rgb0 = np.asarray(crop.resize((w, h), resampling), float)  # interpolate small photos; average larger photos per cell
+    orig_lab = srgb_to_lab(rgb0.reshape(-1, 3)).reshape(h, w, 3)
     face = faces[0] if faces else None
     m = face_mask(w, h, crop.size, face)
     report = dict(profile=profile, detected=analysis, faces=len(faces), dither=dither, grading=grade["mode"], skin_cells=0.0,
@@ -708,9 +734,13 @@ def convert(img, w, h, box=None, dither=DEFAULT_DITHER, grade=None, boost=1.0, s
             rgb = np.where((smask > 0)[..., None], lab_to_srgb(lab.reshape(-1, 3)).reshape(h, w, 3), rgb)
         report["skin_cells"] = round(float((smask > 0.5).mean() * 100), 1)
         detail = face_detail_mask(lab, m, face, crop.size)
+        if small_photo and face is not None:
+            detail = np.maximum(detail, small_frame_face_detail(crop, w, h, face, m))
+            detail = np.minimum(detail * 1.35, 1.0)
         if face is not None:
             local = lab[..., 0] - blurL(lab[..., 0])
-            lab[..., 0] = np.clip(lab[..., 0] + 0.75 * detail * local, 0, 100)
+            detail_gain = 1.2 if small_photo else 0.75
+            lab[..., 0] = np.clip(lab[..., 0] + detail_gain * detail * local, 0, 100)
         report["face_detail_cells"] = round(float((detail > 0.5).mean() * 100), 1)
         if boost > 0 and face is not None:  # extra local contrast on the face only
             L = lab[..., 0]; lab[..., 0] = np.clip(L + boost * m * (L - blurL(L)), 0, 100)

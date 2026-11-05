@@ -44,6 +44,12 @@ important boundaries. The `/enhance` endpoint returns a preview image; the brows
 and uses the enhanced file for mosaic conversion only when the checkbox is enabled. No external API or cloud image
 service is used. It is unchecked by default.
 
+**Small portrait mosaics** (up to 4×4 plate units, 64×64 bricks) use sharper downsampling and pool fine contrast
+from the original crop into detected face cells before palette selection. The frame editor also zooms detected faces
+so the detected face fills about 60% of the frame height for these sizes (versus 52% for larger layouts); users can
+still reframe manually. This helps preserve eyes, brows and mouth at low resolution, but cannot recreate details
+absent from the source or fit photographic detail into a 32×32 mosaic.
+
 ## Run
 
     pip install -r requirements.txt
